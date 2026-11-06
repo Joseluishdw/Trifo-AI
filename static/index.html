@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NeuroZero 2.0 — Micro-Transformer + RAG + Razonamiento + Agente</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <!-- BARRA SUPERIOR -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-icon">🧠</div>
+        <div>
+          <h1>NeuroZero 2.0 <span class="badge-scratch">Self-Attention · RAG · Lógica · Agente</span></h1>
+          <p class="subtitle">Micro-Transformer en NumPy + Lectura de Documentos/Wikipedia + Inferencia Lógica + Herramientas</p>
+        </div>
+      </div>
+
+      <div class="topbar-controls">
+        <label class="toggle-pill active-pill" title="Si le preguntas algo que desconoce, lo investiga sola en Wikipedia, lo indexa en RAG y entrena sus neuronas">
+          <input type="checkbox" id="autoWebToggle" checked />
+          <span>🌐 Auto-Investigar Web</span>
+        </label>
+
+        <label class="toggle-pill active-pill" title="Consolida pesos Q,K,V del Micro-Transformer en segundo plano">
+          <input type="checkbox" id="autoSelfPlayToggle" checked />
+          <span>🔄 Auto-Enseñanza</span>
+        </label>
+
+        <label class="toggle-pill" title="Pedir que tú le escribas manualmente la respuesta cuando no sepa algo">
+          <input type="checkbox" id="curiosityToggle" />
+          <span>✋ Pregunta Manual</span>
+        </label>
+
+        <button class="btn btn-accent" id="btnTrainEpochs" title="Entrena 20 épocas completas del Micro-Transformer con Adam">
+          ⚡ +20 Épocas
+        </button>
+
+        <div class="dropdown">
+          <button class="btn btn-outline" id="btnResetMenu">🔄 Reiniciar</button>
+          <div class="dropdown-menu" id="resetMenu">
+            <button id="btnResetSeed">🌱 Reiniciar con Semilla Básica</button>
+            <button id="btnResetBlank" class="danger-item">🧪 Cerebro 100% Virgen (Tabula Rasa)</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- CONTENIDO PRINCIPAL -->
+    <main class="main-grid">
+      <!-- COLUMNA IZQUIERDA: CHAT + SUBIDA DE ARCHIVOS -->
+      <section class="chat-panel">
+        <div class="chat-header">
+          <div>
+            <h2>💬 Centro Conversacional y de Agente</h2>
+            <p id="teachingBanner" class="teaching-banner hidden">
+              🎯 <strong>Modo Enseñanza Manual:</strong> Escribe la respuesta para <span id="pendingStimulusText"></span> (o escribe «saltar»).
+            </p>
+          </div>
+          <div class="quick-tips">
+            <span class="tip-chip" data-sample="Investiga sobre las redes neuronales artificiales">🌐 Investigar Wikipedia</span>
+            <span class="tip-chip" data-sample="Resuelve 3x + 5 = 20">📐 Resolver ecuación</span>
+            <span class="tip-chip" data-sample="Recuérdame estudiar algoritmos mañana a las 6pm">✅ Crear tarea</span>
+            <span class="tip-chip" data-sample="Si llueve entonces llevo paraguas">🧩 Enseñar regla lógica</span>
+          </div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages"></div>
+
+        <!-- BARRA DE ENTRADA CON SUBIDA DE DOCUMENTOS -->
+        <form class="chat-input-bar" id="chatForm">
+          <input type="file" id="fileUploadInput" accept=".txt,.md,.csv,.py,.js,.java,.json,.html,.docx,.pdf" class="hidden" />
+          <button type="button" class="btn btn-outline" id="btnAttachDoc" title="Subir archivo (.txt, .md, .docx, .py, .csv, .pdf) para que la IA lo lea y aprenda">
+            📎 Subir Doc
+          </button>
+          <input
+            type="text"
+            id="chatInput"
+            placeholder="Habla, pide cálculos, crea tareas, razona o sube un archivo con 📎..."
+            autocomplete="off"
+          />
+          <button type="submit" class="btn btn-primary" id="btnSend">Enviar ➔</button>
+        </form>
+      </section>
+
+      <!-- COLUMNA DERECHA: CEREBRO TRANSFORMER + RAG + PRODUCTIVIDAD -->
+      <aside class="brain-panel">
+        <!-- MÉTRICAS -->
+        <div class="metrics-row">
+          <div class="metric-card">
+            <span class="metric-label">Parámetros</span>
+            <strong class="metric-value" id="metricParams">0</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Vocabulario</span>
+            <strong class="metric-value" id="metricVocab">0</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Docs RAG / Tareas</span>
+            <strong class="metric-value" id="metricRagTasks">0 / 0</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Pasos Backprop</span>
+            <strong class="metric-value" id="metricSteps">0</strong>
+          </div>
+          <div class="metric-card highlight-loss">
+            <span class="metric-label">Último Loss</span>
+            <strong class="metric-value" id="metricLoss">0.0000</strong>
+          </div>
+        </div>
+
+        <!-- MAPA DE CALOR DE SELF-ATTENTION POR PALABRA -->
+        <div class="attention-bar" id="attentionBar">
+          <span class="attn-label">👁️ Atención Q·Kᵀ:</span>
+          <div class="attn-tokens" id="attnTokens">
+            <span class="attn-empty">Envía un mensaje para ver el foco de atención palabra por palabra</span>
+          </div>
+        </div>
+
+        <!-- CANVAS: RED TRANSFORMER + LOSS -->
+        <div class="visualizers-grid">
+          <div class="canvas-box">
+            <div class="canvas-title">
+              <span>⚡ Micro-Transformer (Self-Attention + MLP)</span>
+              <small id="archLabel">128 → 128 → 96 → 64</small>
+            </div>
+            <canvas id="nnCanvas" width="380" height="150"></canvas>
+          </div>
+
+          <div class="canvas-box">
+            <div class="canvas-title">
+              <span>📉 Curva de Aprendizaje (Adam Loss)</span>
+              <small id="epochsLabel">0 épocas</small>
+            </div>
+            <canvas id="lossCanvas" width="380" height="150"></canvas>
+          </div>
+        </div>
+
+        <!-- PESTAÑAS DE PODER -->
+        <div class="tabs-bar">
+          <button class="tab-btn active" data-tab="tabRag">📚 Docs RAG & Wiki</button>
+          <button class="tab-btn" data-tab="tabAgent">✅ Tareas & Notas</button>
+          <button class="tab-btn" data-tab="tabLogic">🧩 Grafo & Lógica</button>
+          <button class="tab-btn" data-tab="tabSelfTeach">🧠 Auto-Estudio</button>
+          <button class="tab-btn" data-tab="tabVocab">🔤 Memoria</button>
+        </div>
+
+        <!-- TAB 1: BIBLIOTECA RAG & AUTO-INVESTIGACIÓN WIKIPEDIA -->
+        <div class="tab-content active" id="tabRag">
+          <form class="mini-two-col-form" id="wikiResearchForm">
+            <input type="text" id="wikiQueryInput" placeholder="Tema a estudiar en Wikipedia (ej: Agujero negro, Compilador)..." required />
+            <button type="submit" class="btn btn-sm btn-accent" id="btnWikiGo">🌐 Estudiar</button>
+          </form>
+          <div class="tab-help">
+            También puedes usar <strong>📎 Subir Doc</strong> en el chat para cargarle tus apuntes (<code>.txt</code>, <code>.md</code>, <code>.docx</code>, <code>.py</code>, <code>.csv</code>, <code>.pdf</code>).
+          </div>
+          <div class="scroll-list" id="ragDocsList"></div>
+        </div>
+
+        <!-- TAB 2: TAREAS Y NOTAS DEL AGENTE -->
+        <div class="tab-content" id="tabAgent">
+          <form class="mini-two-col-form" id="quickTaskForm">
+            <input type="text" id="quickTaskInput" placeholder="Nueva tarea o recordatorio..." required />
+            <button type="submit" class="btn btn-sm btn-primary">+ Tarea</button>
+          </form>
+          <form class="mini-two-col-form" id="quickNoteForm">
+            <input type="text" id="quickNoteInput" placeholder="Guardar nota rápida..." required />
+            <button type="submit" class="btn btn-sm btn-outline">+ Nota</button>
+          </form>
+          <div class="scroll-list" id="agentTasksNotesList"></div>
+        </div>
+
+        <!-- TAB 3: GRAFO DE CONOCIMIENTO E INFERENCIA LÓGICA -->
+        <div class="tab-content" id="tabLogic">
+          <div class="tab-help">
+            Prueba decirle: <code>Python es un lenguaje interpretado</code> y <code>Los lenguajes interpretados no necesitan compilarse</code>, y luego pregunta: <code>¿Python necesita compilarse?</code>
+          </div>
+          <div class="scroll-list" id="factsList"></div>
+        </div>
+
+        <!-- TAB 4: BITÁCORA DE AUTO-ENSEÑANZA -->
+        <div class="tab-content" id="tabSelfTeach">
+          <div class="self-teach-header">
+            <span class="tab-help">Deducciones, lecturas RAG y consolidación neuronal autónoma:</span>
+            <button class="btn btn-sm btn-outline" id="btnManualSelfPlay">🔄 +1 Auto-Repaso</button>
+          </div>
+          <div class="scroll-list" id="selfTeachList"></div>
+        </div>
+
+        <!-- TAB 5: MEMORIA EPISÓDICA Y EMBEDDINGS -->
+        <div class="tab-content" id="tabVocab">
+          <form class="mini-teach-form" id="directTeachForm">
+            <input type="text" id="teachStimulus" placeholder="Estímulo..." required />
+            <input type="text" id="teachResponse" placeholder="Respuesta..." required />
+            <button type="submit" class="btn btn-sm btn-accent">+ Enseñar</button>
+          </form>
+          <div id="neighborsResult" class="neighbors-box hidden"></div>
+          <div class="vocab-cloud" id="vocabCloud" style="max-height: 75px;"></div>
+          <div class="scroll-list" id="episodesList"></div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- MODAL CORRECCIÓN -->
+  <div class="modal-backdrop hidden" id="correctionModal">
+    <div class="modal-card">
+      <h3>✏️ Enseñar / Corregir Respuesta Ideal</h3>
+      <p class="modal-sub">El Micro-Transformer ajustará sus pesos Q, K, V y capas Swish con Adam.</p>
+      <form id="correctionForm">
+        <input type="hidden" id="modalEpisodeId" />
+        <label>¿Qué debe responder la IA a ese mensaje?</label>
+        <textarea id="modalCorrectedText" rows="3" placeholder="Escribe la respuesta ideal..." required></textarea>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-outline" id="btnCancelModal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar y Entrenar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

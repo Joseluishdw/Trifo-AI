@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Estado local entrenado y bases SQLite personales
+data/*.npz
+data/*.json
+data/*.db
+data/*.db-journal
+data/*.db-wal
+exports/*
+!exports/.gitkeep
+
+.env
+.vscode/
