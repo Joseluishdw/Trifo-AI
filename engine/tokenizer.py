@@ -45,21 +45,20 @@ def strip_accents(text: str) -> str:
 
 
 def spanish_stem(word: str) -> str:
-    """
-    Stemmer morfológico en español programado desde cero (inspirado en Snowball).
-    Reduce conjugaciones, plurales y derivados a su raíz semántica común:
-    ej. 'programando', 'programacion', 'programador', 'programar' -> 'program'
-    """
     w = strip_accents(word.lower().strip())
-    if len(w) <= 4:
+    if len(w) <= 3:
+        return w
+    if len(w) == 4:
+        if w.endswith("s") and w[-2] in ("a", "e", "o") and w not in {"tres", "pues", "seis"}:
+            return w[:-1]
         return w
 
-    # Sufijos largos derivativos y verbales ordenados de mayor a menor longitud
     long_suffixes = (
         "amientos", "imientos", "aciones", "iciones", "adoras", "adores",
         "amiento", "imiento", "antemente", "iblemente", "mente",
         "acion", "icion", "adora", "ador", "ancias", "encias", "ancia", "encia",
         "idades", "idad", "ivas", "ivos", "iva", "ivo", "osas", "osos", "osa", "oso",
+        "andose", "iendose", "arse", "erse", "irse",
         "ando", "iendo", "aron", "ieron", "aban", "ian", "aran", "eran", "iran",
         "aste", "iste", "amos", "imos", "emos", "ar", "er", "ir"
     )
@@ -67,7 +66,6 @@ def spanish_stem(word: str) -> str:
         if w.endswith(suf) and len(w) - len(suf) >= 4:
             return w[: -len(suf)]
 
-    # Plurales simples (actualizar w y continuar para unificar vocal de género final)
     if w.endswith("ces") and len(w) > 5:
         w = w[:-3] + "z"
     elif w.endswith("es") and len(w) > 5 and w[-3] not in ("a", "e", "i", "o", "u"):
@@ -75,7 +73,6 @@ def spanish_stem(word: str) -> str:
     elif w.endswith("s") and not w.endswith("ss") and len(w) > 4:
         w = w[:-1]
 
-    # Vocal final de género ('humano'/'humana'/'humanos' -> 'human')
     if w[-1] in ("a", "o", "e") and len(w) > 5:
         w = w[:-1]
 
@@ -380,13 +377,13 @@ class NaturalChatParser:
             (r"(?i)^(?:yo\s+)?tengo\s+(\d+\s*a[ñn]os)$", "usuario", "edad"),
             (r"(?i)^(?:a\s+mi\s+)?me\s+gusta(?:n)?\s+(.+)$", "usuario", "gusto"),
             (r"(?i)^(?:a\s+mi\s+)?me\s+encanta(?:n)?\s+(.+)$", "usuario", "gusto"),
-            (r"(?i)^mi\s+([a-záéíóúñ\s]{2,20}?)\s+favorit[oa]\s+es\s+(.+)$", "usuario_pref", "favorito"),
+            (r"(?i)^mi\s+([a-záéíóúüñ\s]{2,20}?)\s+favorit[oa]\s+es\s+(.+)$", "usuario_pref", "favorito"),
             (r"(?i)^vivo\s+en\s+(.+)$", "usuario", "ubicacion"),
             (r"(?i)^(?:yo\s+)?trabajo\s+(?:en|como|de)\s+(.+)$", "usuario", "trabajo"),
             (r"(?i)^(?:yo\s+)?estudio\s+(.+)$", "usuario", "estudio"),
             (r"(?i)^(?:hoy\s+|ahora\s+)?estoy\s+(.+)$", "usuario", "estado_actual"),
             (r"(?i)^(?:yo\s+)?quiero\s+(.+)$", "usuario", "deseo"),
-            (r"(?i)^soy\s+(?:un|una)?\s*([a-záéíóúñ\s]{3,40})$", "usuario", "identidad"),
+            (r"(?i)^soy\s+(?:un|una)?\s*([a-záéíóúüñ\s]{3,40})$", "usuario", "identidad"),
         ]
         for pat, subj_type, rel in user_patterns:
             m = re.match(pat, clean)
@@ -425,8 +422,22 @@ class NaturalChatParser:
                         "category": "ai",
                     }
 
-        # 3. Cuantificadores lógicos ("Todos los X son Y" / "Todo X es Y" / "Ningún X es Y")
-        univ_m = re.match(r"(?i)^(?:todos?\s+(?:los|las)?|cada)\s+([a-záéíóúñ0-9\s]{2,35}?)\s+(es\s+un|es\s+una|es|son|tiene|tienen|puede|pueden|necesita|necesitan)\s+(.+)$", clean)
+        neg_univ_m = re.match(
+            r"(?i)^(?:ningun[oa]?)\s+([a-záéíóúñ0-9\s]{1,35}?)\s+(es\s+un|es\s+una|es|son|tiene|tienen|puede|pueden|necesita|necesitan)\s+(.+)$",
+            strip_accents(clean),
+        )
+        if neg_univ_m:
+            return {
+                "subject": neg_univ_m.group(1).strip(),
+                "relation": f"no {neg_univ_m.group(2).strip().lower()}",
+                "object": neg_univ_m.group(3).strip(),
+                "category": "world",
+            }
+
+        univ_m = re.match(
+            r"(?i)^(?:tod[oa]s?\s+(?:los\s+|las\s+)?|cada\s+)([a-záéíóúüñ0-9\s]{1,35}?)\s+(es\s+un|es\s+una|es|son|tiene|tienen|puede|pueden|necesita|necesitan|no\s+puede(?:n)?|no\s+necesita(?:n)?|no\s+es|no\s+son)\s+(.+)$",
+            clean,
+        )
         if univ_m:
             return {
                 "subject": univ_m.group(1).strip(),
@@ -435,10 +446,15 @@ class NaturalChatParser:
                 "category": "world",
             }
 
-        # 4. Afirmaciones universales y hechos del mundo
+        rel_expr = (
+            r"no\s+es\s+un|no\s+es\s+una|no\s+es|no\s+son|no\s+tiene(?:n)?|no\s+puede(?:n)?|no\s+necesita(?:n)?|"
+            r"es\s+un|es\s+una|es\s+el|es\s+la|es|son|significa|tiene|tienen|puede|pueden|"
+            r"sirve\s+para|sirven\s+para|funciona\s+para|funciona\s+con|ayuda\s+a|queda\s+en|esta\s+en|"
+            r"vive\s+en|viven\s+en|come|comen|usa|usan|hace|hacen|fue|produce|causa|necesita|necesitan|pertenece\s+a"
+        )
         world_patterns = [
-            r"(?i)^(?:recuerda\s+que|aprende\s+que|sabias\s+que|ten\s+en\s+cuenta\s+que|fijate\s+que)\s+(.+?)\s+(es\s+un|es\s+una|es\s+el|es\s+la|es|son|significa|tiene|tienen|hace|hacen|sirve\s+para|funciona\s+con|esta\s+en|fue|produce|causa|no\s+puede(?:n)?|no\s+necesita(?:n)?)\s+(.+)$",
-            r"(?i)^(?:el|la|los|las|un|una)?\s*([a-záéíóúñ0-9\s]{2,35}?)\s+(es\s+un|es\s+una|es\s+el|es\s+la|es|son|significa|tiene|tienen|sirve\s+para|sirven\s+para|funciona\s+para|ayuda\s+a|queda\s+en|esta\s+en|vive\s+en|viven\s+en|come|comen|usa|usan|necesita|necesitan|no\s+necesita(?:n)?|no\s+puede(?:n)?|pertenece\s+a)\s+(.+)$",
+            rf"(?i)^(?:recuerda\s+que|aprende\s+que|sabias\s+que|ten\s+en\s+cuenta\s+que|fijate\s+que)\s+(?:(?:el|la|los|las|un|una)\s+)?(.+?)\s+({rel_expr})\s+(.+)$",
+            rf"(?i)^(?:(?:el|la|los|las|un|una)\s+)?([a-záéíóúüñ0-9][a-záéíóúüñ0-9\s]{{0,34}}?)\s+({rel_expr})\s+(.+)$",
         ]
         for pat in world_patterns:
             m = re.match(pat, clean)
@@ -450,9 +466,10 @@ class NaturalChatParser:
                 invalid_subjects = {
                     "eso", "esto", "aquello", "que", "como", "cual", "quien",
                     "todo", "nada", "algo", "hola", "bien", "mal", "si", "no",
-                    "tu", "yo", "el", "ella", "mi"
+                    "tu", "yo", "el", "ella", "mi", "un", "una", "la", "los", "las",
+                    "me", "te", "se", "lo", "le"
                 }
-                if subj_norm not in invalid_subjects and len(subj) >= 2 and len(obj) >= 2:
+                if subj_norm not in invalid_subjects and len(subj) >= 1 and len(obj) >= 1:
                     return {
                         "subject": subj,
                         "relation": rel,

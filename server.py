@@ -1,10 +1,10 @@
 """
-Servidor Web Local para NeuroZero 2.0 (Paquete Completo).
-Incluye endpoints REST para:
-- Chat Híbrido con Micro-Transformer (Self-Attention) y Auto-Enseñanza.
-- Subida e indexación RAG de archivos (.txt, .md, .docx, .py, .csv, .pdf).
-- Auto-Investigación en Wikipedia.
-- Gestión de Tareas, Recordatorios y Notas (Agente Útil).
+NeuroZero 3.0 — Servidor HTTP Concurrente Thread-Safe (Python stdlib).
+Expone la API REST local para:
+- Chat Neuro-Simbólico con Micro-Transformer MHSA (H=4 + LayerNorm) y Memoria Multi-Turno.
+- Subida de documentos RAG (.txt, .md, .docx, .py, .csv con estadística NumPy, .pdf) y Auto-Investigación en Wikipedia.
+- Agente Multi-Herramienta Encadenado (ecuaciones cuadráticas reales/complejas, notas, tareas, archivos).
+- Exportación e importación atómica de respaldos completos del cerebro.
 """
 
 import os
@@ -38,12 +38,14 @@ class NeuroZeroRequestHandler(SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-    def _send_json(self, data: dict, status: int = 200):
+    def _send_json(self, data: dict, status: int = 200, download_filename: str = ""):
         raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-store")
+        if download_filename:
+            self.send_header("Content-Disposition", f'attachment; filename="{download_filename}"')
         self.end_headers()
         self.wfile.write(raw)
 
@@ -58,6 +60,10 @@ class NeuroZeroRequestHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/state":
             self._send_json({"ok": True, "brain_state": AI_BRAIN.get_brain_telemetry()})
+            return
+        if parsed.path == "/api/export_backup":
+            backup = AI_BRAIN.export_full_backup()
+            self._send_json(backup, status=200, download_filename="neurozero_v3_backup.json")
             return
         if parsed.path in ("/", ""):
             self.path = "/index.html"
@@ -89,6 +95,12 @@ class NeuroZeroRequestHandler(SimpleHTTPRequestHandler):
             self._send_json(res)
             return
 
+        if parsed.path == "/api/import_backup":
+            backup_payload = body.get("backup", body)
+            res = AI_BRAIN.import_full_backup(backup_payload)
+            self._send_json(res, status=200 if res.get("ok") else 400)
+            return
+
         if parsed.path == "/api/research":
             query = str(body.get("query", "")).strip()
             if not query:
@@ -100,36 +112,39 @@ class NeuroZeroRequestHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/delete_doc":
             doc_id = int(body.get("id", -1))
-            AI_BRAIN.rag.delete_document(doc_id)
-            self._send_json({"ok": True, "brain_state": AI_BRAIN.get_brain_telemetry()})
+            self._send_json(AI_BRAIN.delete_rag_document(doc_id))
             return
 
         if parsed.path == "/api/tasks":
             action = str(body.get("action", ""))
-            if action == "add":
-                desc = str(body.get("description", "")).strip()
-                if desc:
-                    AI_BRAIN.toolkit.add_task(desc)
-            elif action == "toggle":
-                tid = int(body.get("id", -1))
-                done = bool(body.get("done", True))
-                AI_BRAIN.toolkit.toggle_task(tid, done=done)
-            elif action == "delete":
-                tid = int(body.get("id", -1))
-                AI_BRAIN.toolkit.delete_task(tid)
-            self._send_json({"ok": True, "brain_state": AI_BRAIN.get_brain_telemetry()})
+            with AI_BRAIN._lock:
+                if action == "add":
+                    desc = str(body.get("description", "")).strip()
+                    if desc:
+                        AI_BRAIN.toolkit.add_task(desc)
+                elif action == "toggle":
+                    tid = int(body.get("id", -1))
+                    done = bool(body.get("done", True))
+                    AI_BRAIN.toolkit.toggle_task(tid, done=done)
+                elif action == "delete":
+                    tid = int(body.get("id", -1))
+                    AI_BRAIN.toolkit.delete_task(tid)
+                telemetry = AI_BRAIN.get_brain_telemetry()
+            self._send_json({"ok": True, "brain_state": telemetry})
             return
 
         if parsed.path == "/api/notes":
             action = str(body.get("action", ""))
-            if action == "add":
-                content = str(body.get("content", "")).strip()
-                if content:
-                    AI_BRAIN.toolkit.add_note(content)
-            elif action == "delete":
-                nid = int(body.get("id", -1))
-                AI_BRAIN.toolkit.delete_note(nid)
-            self._send_json({"ok": True, "brain_state": AI_BRAIN.get_brain_telemetry()})
+            with AI_BRAIN._lock:
+                if action == "add":
+                    content = str(body.get("content", "")).strip()
+                    if content:
+                        AI_BRAIN.toolkit.add_note(content)
+                elif action == "delete":
+                    nid = int(body.get("id", -1))
+                    AI_BRAIN.toolkit.delete_note(nid)
+                telemetry = AI_BRAIN.get_brain_telemetry()
+            self._send_json({"ok": True, "brain_state": telemetry})
             return
 
         if parsed.path == "/api/feedback":
@@ -175,30 +190,17 @@ class NeuroZeroRequestHandler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/settings":
-            if "curiosity_mode" in body:
-                AI_BRAIN.curiosity_mode = bool(body["curiosity_mode"])
-                if not AI_BRAIN.curiosity_mode:
-                    AI_BRAIN.pending_unknown_stimulus = None
-            if "auto_self_play" in body:
-                AI_BRAIN.auto_self_play = bool(body["auto_self_play"])
-            if "auto_web_research" in body:
-                AI_BRAIN.auto_web_research = bool(body["auto_web_research"])
-            AI_BRAIN.save_state()
-            self._send_json({"ok": True, "brain_state": AI_BRAIN.get_brain_telemetry()})
+            self._send_json(AI_BRAIN.update_settings(body))
             return
 
         if parsed.path == "/api/delete_episode":
             ep_id = int(body.get("id", -1))
-            AI_BRAIN.memory.episodes = [ep for ep in AI_BRAIN.memory.episodes if ep.id != ep_id]
-            AI_BRAIN.save_state()
-            self._send_json({"ok": True, "brain_state": AI_BRAIN.get_brain_telemetry()})
+            self._send_json(AI_BRAIN.delete_episode(ep_id))
             return
 
         if parsed.path == "/api/delete_fact":
             fact_id = int(body.get("id", -1))
-            AI_BRAIN.memory.facts = [f for f in AI_BRAIN.memory.facts if int(f.get("id", 0)) != fact_id]
-            AI_BRAIN.save_state()
-            self._send_json({"ok": True, "brain_state": AI_BRAIN.get_brain_telemetry()})
+            self._send_json(AI_BRAIN.delete_fact(fact_id))
             return
 
         if parsed.path == "/api/neighbors":
@@ -214,9 +216,9 @@ class NeuroZeroRequestHandler(SimpleHTTPRequestHandler):
                 {
                     "ok": True,
                     "message": (
-                        "Cerebro NeuroZero 2.0 reiniciado con semilla básica."
+                        "Cerebro NeuroZero 3.0 reiniciado con semilla básica."
                         if include_seed
-                        else "Cerebro reiniciado 100% Virgen (Tabula Rasa)."
+                        else "Cerebro NeuroZero 3.0 reiniciado 100% Virgen (Tabula Rasa)."
                     ),
                     "brain_state": AI_BRAIN.get_brain_telemetry(),
                 }
@@ -230,11 +232,11 @@ def run_server(port: int = 8090, open_browser: bool = True):
     server_address = ("127.0.0.1", port)
     httpd = ThreadingHTTPServer(server_address, NeuroZeroRequestHandler)
     url = f"http://127.0.0.1:{port}"
-    print("=" * 68)
-    print("  NEUROZERO 2.0 - MICRO-TRANSFORMER + RAG + AGENTE + MOTOR LOGICO")
-    print("=" * 68)
+    print("=" * 72)
+    print("  NEUROZERO 3.0 (TRIFO-AI) - MHSA 4-HEADS + LAYERNORM + RAG + AGENTE")
+    print("=" * 72)
     print(f"  Servidor activo en: {url}")
-    print("=" * 68)
+    print("=" * 72)
     if open_browser:
         try:
             webbrowser.open(url)

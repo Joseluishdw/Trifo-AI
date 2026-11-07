@@ -3,224 +3,593 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NeuroZero 2.0 — Micro-Transformer + RAG + Razonamiento + Agente</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <title>NeuroZero 3.0 — Trifo-AI Cyber-Lab</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="/styles.css?v=3.0" />
 </head>
 <body>
-  <div class="app-layout">
-    <!-- BARRA SUPERIOR -->
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-icon">🧠</div>
-        <div>
-          <h1>NeuroZero 2.0 <span class="badge-scratch">Self-Attention · RAG · Lógica · Agente</span></h1>
-          <p class="subtitle">Micro-Transformer en NumPy + Lectura de Documentos/Wikipedia + Inferencia Lógica + Herramientas</p>
+  <div class="app-shell" id="appShell">
+    <!-- ZONA 1: SIDEBAR IZQUIERDO COMPACTO Y COLAPSABLE -->
+    <aside class="sidebar" id="appSidebar">
+      <div class="sidebar-brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 21 7 21 17 12 22 3 17 3 7 12 2"></polygon>
+            <circle cx="12" cy="12" r="3"></circle>
+            <line x1="12" y1="2" x2="12" y2="9"></line>
+            <line x1="21" y1="17" x2="14.6" y2="13.5"></line>
+            <line x1="3" y1="17" x2="9.4" y2="13.5"></line>
+          </svg>
+        </div>
+        <div class="brand-copy">
+          <span class="brand-name">NeuroZero <span class="brand-ver">3.0</span></span>
+          <span class="brand-tag">TRIFO-AI ENGINE</span>
         </div>
       </div>
 
-      <div class="topbar-controls">
-        <label class="toggle-pill active-pill" title="Si le preguntas algo que desconoce, lo investiga sola en Wikipedia, lo indexa en RAG y entrena sus neuronas">
-          <input type="checkbox" id="autoWebToggle" checked />
-          <span>🌐 Auto-Investigar Web</span>
-        </label>
+      <nav class="sidebar-nav" aria-label="Modos principales">
+        <div class="nav-section-label">VISTAS</div>
 
-        <label class="toggle-pill active-pill" title="Consolida pesos Q,K,V del Micro-Transformer en segundo plano">
-          <input type="checkbox" id="autoSelfPlayToggle" checked />
-          <span>🔄 Auto-Enseñanza</span>
-        </label>
-
-        <label class="toggle-pill" title="Pedir que tú le escribas manualmente la respuesta cuando no sepa algo">
-          <input type="checkbox" id="curiosityToggle" />
-          <span>✋ Pregunta Manual</span>
-        </label>
-
-        <button class="btn btn-accent" id="btnTrainEpochs" title="Entrena 20 épocas completas del Micro-Transformer con Adam">
-          ⚡ +20 Épocas
+        <button type="button" class="nav-item active" data-view="chat" title="Chat & Agente (Alt+1)">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            <path d="M8 9h8"></path>
+            <path d="M8 13h5"></path>
+          </svg>
+          <span class="nav-label">Chat &amp; Agente</span>
+          <kbd class="nav-kbd">1</kbd>
         </button>
 
-        <div class="dropdown">
-          <button class="btn btn-outline" id="btnResetMenu">🔄 Reiniciar</button>
-          <div class="dropdown-menu" id="resetMenu">
-            <button id="btnResetSeed">🌱 Reiniciar con Semilla Básica</button>
-            <button id="btnResetBlank" class="danger-item">🧪 Cerebro 100% Virgen (Tabula Rasa)</button>
+        <button type="button" class="nav-item" data-view="inspector" title="Inspector Neuronal en Vivo (Alt+2)">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+          <span class="nav-label">Inspector Neuronal</span>
+          <kbd class="nav-kbd">2</kbd>
+        </button>
+
+        <button type="button" class="nav-item" data-view="knowledge" title="Centro de Conocimiento y Productividad (Alt+3)">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+          </svg>
+          <span class="nav-label">Conocimiento &amp; Lab</span>
+          <kbd class="nav-kbd">3</kbd>
+        </button>
+
+        <div class="nav-divider"></div>
+        <div class="nav-section-label">DISPOSICIÓN</div>
+
+        <button type="button" class="nav-item" id="btnSplitView" title="Alternar Vista Dividida: Chat + Inspector en Vivo (Alt+S)">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+            <line x1="12" y1="3" x2="12" y2="21"></line>
+          </svg>
+          <span class="nav-label">Split View</span>
+          <kbd class="nav-kbd">S</kbd>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-mini-stats">
+          <div class="mini-stat-row">
+            <span>PARAMS</span>
+            <strong id="sideMetricParams" class="mono">0</strong>
+          </div>
+          <div class="mini-stat-row">
+            <span>LOSS</span>
+            <strong id="sideMetricLoss" class="mono accent-text">0.0000</strong>
           </div>
         </div>
+
+        <button type="button" class="sidebar-collapse-btn" id="btnToggleSidebar" title="Colapsar / Expandir barra lateral">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+            <line x1="9" y1="3" x2="9" y2="21"></line>
+          </svg>
+          <span class="nav-label">Colapsar panel</span>
+        </button>
       </div>
-    </header>
+    </aside>
 
-    <!-- CONTENIDO PRINCIPAL -->
-    <main class="main-grid">
-      <!-- COLUMNA IZQUIERDA: CHAT + SUBIDA DE ARCHIVOS -->
-      <section class="chat-panel">
-        <div class="chat-header">
-          <div>
-            <h2>💬 Centro Conversacional y de Agente</h2>
-            <p id="teachingBanner" class="teaching-banner hidden">
-              🎯 <strong>Modo Enseñanza Manual:</strong> Escribe la respuesta para <span id="pendingStimulusText"></span> (o escribe «saltar»).
-            </p>
-          </div>
-          <div class="quick-tips">
-            <span class="tip-chip" data-sample="Investiga sobre las redes neuronales artificiales">🌐 Investigar Wikipedia</span>
-            <span class="tip-chip" data-sample="Resuelve 3x + 5 = 20">📐 Resolver ecuación</span>
-            <span class="tip-chip" data-sample="Recuérdame estudiar algoritmos mañana a las 6pm">✅ Crear tarea</span>
-            <span class="tip-chip" data-sample="Si llueve entonces llevo paraguas">🧩 Enseñar regla lógica</span>
+    <!-- CONTENEDOR DERECHO (TOPBAR + WORKSPACE PRINCIPAL) -->
+    <div class="main-column">
+      <!-- BARRA SUPERIOR MINIMALISTA DE TELEMETRÍA Y ACCIONES -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 class="view-title" id="activeViewTitle">Chat &amp; Agente</h1>
+          <div class="status-pill" id="systemStatusPill" data-state="idle">
+            <span class="status-dot"></span>
+            <span class="status-text mono" id="systemStatusText">IDLE · READY</span>
           </div>
         </div>
 
-        <div class="chat-messages" id="chatMessages"></div>
+        <div class="topbar-controls">
+          <div class="switches-group">
+            <label class="switch-chip" title="Auto-investigar en Wikipedia cuando desconoce un concepto enciclopédico">
+              <input type="checkbox" id="autoWebToggle" checked />
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              </svg>
+              <span>Auto-Wiki</span>
+            </label>
 
-        <!-- BARRA DE ENTRADA CON SUBIDA DE DOCUMENTOS -->
-        <form class="chat-input-bar" id="chatForm">
-          <input type="file" id="fileUploadInput" accept=".txt,.md,.csv,.py,.js,.java,.json,.html,.docx,.pdf" class="hidden" />
-          <button type="button" class="btn btn-outline" id="btnAttachDoc" title="Subir archivo (.txt, .md, .docx, .py, .csv, .pdf) para que la IA lo lea y aprenda">
-            📎 Subir Doc
-          </button>
-          <input
-            type="text"
-            id="chatInput"
-            placeholder="Habla, pide cálculos, crea tareas, razona o sube un archivo con 📎..."
-            autocomplete="off"
-          />
-          <button type="submit" class="btn btn-primary" id="btnSend">Enviar ➔</button>
-        </form>
-      </section>
+            <label class="switch-chip" title="Consolidar pesos MHSA y LayerNorm en segundo plano cada 9s">
+              <input type="checkbox" id="autoSelfPlayToggle" checked />
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <polyline points="1 20 1 14 7 14"></polyline>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+              </svg>
+              <span>Self-Play</span>
+            </label>
 
-      <!-- COLUMNA DERECHA: CEREBRO TRANSFORMER + RAG + PRODUCTIVIDAD -->
-      <aside class="brain-panel">
-        <!-- MÉTRICAS -->
-        <div class="metrics-row">
-          <div class="metric-card">
-            <span class="metric-label">Parámetros</span>
-            <strong class="metric-value" id="metricParams">0</strong>
+            <label class="switch-chip" title="Solicitar respuesta manual ante preguntas desconocidas">
+              <input type="checkbox" id="curiosityToggle" />
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+              <span>Manual</span>
+            </label>
           </div>
-          <div class="metric-card">
-            <span class="metric-label">Vocabulario</span>
-            <strong class="metric-value" id="metricVocab">0</strong>
-          </div>
-          <div class="metric-card">
-            <span class="metric-label">Docs RAG / Tareas</span>
-            <strong class="metric-value" id="metricRagTasks">0 / 0</strong>
-          </div>
-          <div class="metric-card">
-            <span class="metric-label">Pasos Backprop</span>
-            <strong class="metric-value" id="metricSteps">0</strong>
-          </div>
-          <div class="metric-card highlight-loss">
-            <span class="metric-label">Último Loss</span>
-            <strong class="metric-value" id="metricLoss">0.0000</strong>
-          </div>
-        </div>
 
-        <!-- MAPA DE CALOR DE SELF-ATTENTION POR PALABRA -->
-        <div class="attention-bar" id="attentionBar">
-          <span class="attn-label">👁️ Atención Q·Kᵀ:</span>
-          <div class="attn-tokens" id="attnTokens">
-            <span class="attn-empty">Envía un mensaje para ver el foco de atención palabra por palabra</span>
-          </div>
-        </div>
+          <div class="actions-group">
+            <button type="button" class="btn btn-accent" id="btnTrainEpochs" title="Entrenar 20 épocas completas con Global L2 Clip + Adam">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+              </svg>
+              <span>+20 Épocas</span>
+            </button>
 
-        <!-- CANVAS: RED TRANSFORMER + LOSS -->
-        <div class="visualizers-grid">
-          <div class="canvas-box">
-            <div class="canvas-title">
-              <span>⚡ Micro-Transformer (Self-Attention + MLP)</span>
-              <small id="archLabel">128 → 128 → 96 → 64</small>
+            <button type="button" class="btn btn-ghost" id="btnExportBackup" title="Exportar respaldo completo del cerebro (.json)">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Exportar</span>
+            </button>
+
+            <input type="file" id="backupUploadInput" accept=".json" class="hidden" />
+            <button type="button" class="btn btn-ghost" id="btnImportBackup" title="Importar respaldo completo del cerebro (.json)">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              <span>Importar</span>
+            </button>
+
+            <div class="dropdown">
+              <button type="button" class="btn btn-ghost btn-icon-only" id="btnResetMenu" title="Opciones de reinicio del motor">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                  <path d="M3 3v5h5"></path>
+                </svg>
+              </button>
+              <div class="dropdown-menu" id="resetMenu">
+                <button type="button" id="btnResetSeed">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22v-7"></path>
+                    <path d="M7 12c-3 0-5-2-5-5 3 0 5 2 5 5z"></path>
+                    <path d="M17 12c3 0 5-2 5-5-3 0-5 2-5 5z"></path>
+                    <path d="M12 15c0-4 3-7 7-7"></path>
+                    <path d="M12 15c0-4-3-7-7-7"></path>
+                  </svg>
+                  <span>Reiniciar con Semilla v3</span>
+                </button>
+                <button type="button" id="btnResetBlank" class="danger-item">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                    <path d="M10 11v6"></path>
+                    <path d="M14 11v6"></path>
+                  </svg>
+                  <span>Tabula Rasa (Cero Absoluto)</span>
+                </button>
+              </div>
             </div>
-            <canvas id="nnCanvas" width="380" height="150"></canvas>
           </div>
+        </div>
+      </header>
 
-          <div class="canvas-box">
-            <div class="canvas-title">
-              <span>📉 Curva de Aprendizaje (Adam Loss)</span>
-              <small id="epochsLabel">0 épocas</small>
+      <!-- ZONA DE TRABAJO DINÁMICA (3 VISTAS + SPLIT VIEW REDIMENSIONABLE) -->
+      <main class="workspace mode-chat" id="mainWorkspace">
+        <!-- VISTA 1: CHAT & AGENTE -->
+        <section class="view-pane chat-pane" id="viewChat" aria-label="Chat y Agente">
+          <div id="teachingBanner" class="teaching-banner hidden">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <div>
+              <strong>Modo Enseñanza Manual Activo:</strong> Escribe la respuesta ideal para
+              <span id="pendingStimulusText" class="mono"></span> o escribe <code class="mono">saltar</code>.
             </div>
-            <canvas id="lossCanvas" width="380" height="150"></canvas>
           </div>
-        </div>
 
-        <!-- PESTAÑAS DE PODER -->
-        <div class="tabs-bar">
-          <button class="tab-btn active" data-tab="tabRag">📚 Docs RAG & Wiki</button>
-          <button class="tab-btn" data-tab="tabAgent">✅ Tareas & Notas</button>
-          <button class="tab-btn" data-tab="tabLogic">🧩 Grafo & Lógica</button>
-          <button class="tab-btn" data-tab="tabSelfTeach">🧠 Auto-Estudio</button>
-          <button class="tab-btn" data-tab="tabVocab">🔤 Memoria</button>
-        </div>
-
-        <!-- TAB 1: BIBLIOTECA RAG & AUTO-INVESTIGACIÓN WIKIPEDIA -->
-        <div class="tab-content active" id="tabRag">
-          <form class="mini-two-col-form" id="wikiResearchForm">
-            <input type="text" id="wikiQueryInput" placeholder="Tema a estudiar en Wikipedia (ej: Agujero negro, Compilador)..." required />
-            <button type="submit" class="btn btn-sm btn-accent" id="btnWikiGo">🌐 Estudiar</button>
-          </form>
-          <div class="tab-help">
-            También puedes usar <strong>📎 Subir Doc</strong> en el chat para cargarle tus apuntes (<code>.txt</code>, <code>.md</code>, <code>.docx</code>, <code>.py</code>, <code>.csv</code>, <code>.pdf</code>).
+          <div class="chat-stream-wrap">
+            <div class="chat-messages" id="chatMessages"></div>
           </div>
-          <div class="scroll-list" id="ragDocsList"></div>
-        </div>
 
-        <!-- TAB 2: TAREAS Y NOTAS DEL AGENTE -->
-        <div class="tab-content" id="tabAgent">
-          <form class="mini-two-col-form" id="quickTaskForm">
-            <input type="text" id="quickTaskInput" placeholder="Nueva tarea o recordatorio..." required />
-            <button type="submit" class="btn btn-sm btn-primary">+ Tarea</button>
-          </form>
-          <form class="mini-two-col-form" id="quickNoteForm">
-            <input type="text" id="quickNoteInput" placeholder="Guardar nota rápida..." required />
-            <button type="submit" class="btn btn-sm btn-outline">+ Nota</button>
-          </form>
-          <div class="scroll-list" id="agentTasksNotesList"></div>
-        </div>
+          <!-- DOCK FLOTANTE CON CHIPS DISCRETOS Y BARRA DE COMANDOS GLASSMORPHISM -->
+          <div class="chat-dock">
+            <div class="prompt-chips-row">
+              <button type="button" class="prompt-chip" data-sample="Resuelve x^2 - 5x + 6 = 0 y guárdalo en una nota">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                </svg>
+                <span>Cuadrática + Nota</span>
+              </button>
+              <button type="button" class="prompt-chip" data-sample="Resuelve x^2 + 4 = 0">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="4" y1="9" x2="20" y2="9"></line>
+                  <line x1="4" y1="15" x2="20" y2="15"></line>
+                  <line x1="10" y1="3" x2="8" y2="21"></line>
+                  <line x1="16" y1="3" x2="14" y2="21"></line>
+                </svg>
+                <span>Raíces en ℂ</span>
+              </button>
+              <button type="button" class="prompt-chip" data-sample="Todos los humanos son mortales">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="18" cy="5" r="3"></circle>
+                  <circle cx="6" cy="12" r="3"></circle>
+                  <circle cx="18" cy="19" r="3"></circle>
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                </svg>
+                <span>Axioma Lógico</span>
+              </button>
+              <button type="button" class="prompt-chip" data-sample="¿Por qué Sócrates es mortal?">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="9 14 4 9 9 4"></polyline>
+                  <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
+                </svg>
+                <span>Backward Chaining</span>
+              </button>
+              <button type="button" class="prompt-chip" data-sample="Investiga sobre las redes neuronales artificiales">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <span>Investigar Wikipedia</span>
+              </button>
+            </div>
 
-        <!-- TAB 3: GRAFO DE CONOCIMIENTO E INFERENCIA LÓGICA -->
-        <div class="tab-content" id="tabLogic">
-          <div class="tab-help">
-            Prueba decirle: <code>Python es un lenguaje interpretado</code> y <code>Los lenguajes interpretados no necesitan compilarse</code>, y luego pregunta: <code>¿Python necesita compilarse?</code>
+            <form class="command-bar glass-panel" id="chatForm">
+              <input type="file" id="fileUploadInput" accept=".txt,.md,.csv,.py,.js,.java,.json,.html,.docx,.pdf" class="hidden" />
+              <button type="button" class="cmd-icon-btn" id="btnAttachDoc" title="Subir documento o dataset CSV para indexación RAG / análisis NumPy">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                </svg>
+              </button>
+              <input
+                type="text"
+                id="chatInput"
+                placeholder="Escribe un mensaje, encadena herramientas, resuelve ax²+bx+c=0 o pregunta ¿Por qué...?"
+                autocomplete="off"
+              />
+              <button type="submit" class="cmd-send-btn" id="btnSend" title="Enviar mensaje">
+                <span>Ejecutar</span>
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                  <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+              </button>
+            </form>
           </div>
-          <div class="scroll-list" id="factsList"></div>
+        </section>
+
+        <!-- DIVISOR REDIMENSIONABLE PARA SPLIT VIEW -->
+        <div class="split-resizer" id="splitResizer" title="Arrastra para redimensionar paneles">
+          <div class="split-resizer-grip"></div>
         </div>
 
-        <!-- TAB 4: BITÁCORA DE AUTO-ENSEÑANZA -->
-        <div class="tab-content" id="tabSelfTeach">
-          <div class="self-teach-header">
-            <span class="tab-help">Deducciones, lecturas RAG y consolidación neuronal autónoma:</span>
-            <button class="btn btn-sm btn-outline" id="btnManualSelfPlay">🔄 +1 Auto-Repaso</button>
+        <!-- VISTA 2: INSPECTOR NEURONAL EN VIVO -->
+        <section class="view-pane inspector-pane" id="viewInspector" aria-label="Inspector Neuronal en Vivo">
+          <div class="inspector-scroll">
+            <!-- BANDA DE MÉTRICAS MONOESPACIADAS -->
+            <div class="kpi-strip">
+              <div class="kpi-card">
+                <span class="kpi-label">PARÁMETROS</span>
+                <strong class="kpi-val mono" id="metricParams">0</strong>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-label">VOCABULARIO</span>
+                <strong class="kpi-val mono" id="metricVocab">0</strong>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-label">DOCS RAG / TAREAS</span>
+                <strong class="kpi-val mono" id="metricRagTasks">0 / 0</strong>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-label">STEPS · ‖∇‖₂</span>
+                <strong class="kpi-val mono" id="metricSteps">0 (0.00)</strong>
+              </div>
+              <div class="kpi-card kpi-highlight">
+                <span class="kpi-label">ADAM LOSS</span>
+                <strong class="kpi-val mono accent-text" id="metricLoss">0.0000</strong>
+              </div>
+            </div>
+
+            <!-- VISUALIZADORES HIGH-DPI: MICRO-TRANSFORMER + CURVA DE LOSS -->
+            <div class="canvases-grid">
+              <div class="lab-card canvas-card">
+                <div class="card-header">
+                  <div class="card-title-group">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="3"></circle>
+                      <path d="M12 2v4"></path>
+                      <path d="M12 18v4"></path>
+                      <path d="M4.93 4.93l2.83 2.83"></path>
+                      <path d="M16.24 16.24l2.83 2.83"></path>
+                      <path d="M2 12h4"></path>
+                      <path d="M18 12h4"></path>
+                    </svg>
+                    <span>Micro-Transformer Topology</span>
+                  </div>
+                  <span class="card-meta mono" id="archLabel">4H·128 → 128 → 96 → 64</span>
+                </div>
+                <div class="canvas-viewport" id="nnViewport">
+                  <canvas id="nnCanvas"></canvas>
+                </div>
+              </div>
+
+              <div class="lab-card canvas-card">
+                <div class="card-header">
+                  <div class="card-title-group">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                      <polyline points="17 6 23 6 23 12"></polyline>
+                    </svg>
+                    <span>Optimization Trajectory (L2 Clip + Adam)</span>
+                  </div>
+                  <span class="card-meta mono" id="epochsLabel">0 EPOCHS</span>
+                </div>
+                <div class="canvas-viewport" id="lossViewport">
+                  <canvas id="lossCanvas"></canvas>
+                </div>
+              </div>
+            </div>
+
+            <!-- MAPA DE CALOR DE LAS 4 CABEZAS DE SELF-ATTENTION -->
+            <div class="lab-card" id="attentionBar">
+              <div class="card-header">
+                <div class="card-title-group">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                  </svg>
+                  <span>Multi-Head Self-Attention Heatmap (Q·Kᵀ / √dₕ)</span>
+                </div>
+                <div class="head-switcher" id="headSwitcher">
+                  <button type="button" class="head-btn active" data-head="combined">Combinada</button>
+                  <button type="button" class="head-btn" data-head="head_0">H1</button>
+                  <button type="button" class="head-btn" data-head="head_1">H2</button>
+                  <button type="button" class="head-btn" data-head="head_2">H3</button>
+                  <button type="button" class="head-btn" data-head="head_3">H4</button>
+                </div>
+              </div>
+              <div class="attn-tokens" id="attnTokens">
+                <span class="empty-hint">Envía un mensaje en el chat para inspeccionar la distribución de pesos por cabeza de atención.</span>
+              </div>
+            </div>
+
+            <!-- PANELES INFERIORES COLAPSABLES DEL INSPECTOR: EMBEDDINGS + MEMORIA DE TRABAJO & LOG -->
+            <div class="inspector-bottom-grid">
+              <details class="lab-card collapsible-card" open>
+                <summary class="card-header collapsible-summary">
+                  <div class="card-title-group">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                      <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                      <polyline points="2 17 12 22 22 17"></polyline>
+                      <polyline points="2 12 12 17 22 12"></polyline>
+                    </svg>
+                    <span>Embedding Space (W_emb) &amp; Episodic Memory</span>
+                  </div>
+                  <svg class="chevron-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </summary>
+                <div class="collapsible-body">
+                  <form class="inline-form-triple" id="directTeachForm">
+                    <input type="text" id="teachStimulus" placeholder="Estímulo de entrada..." required />
+                    <input type="text" id="teachResponse" placeholder="Respuesta objetivo..." required />
+                    <button type="submit" class="btn btn-accent btn-sm">Entrenar Par</button>
+                  </form>
+                  <div id="neighborsResult" class="neighbors-box hidden"></div>
+                  <div class="vocab-cloud" id="vocabCloud"></div>
+                  <div class="compact-list" id="episodesList"></div>
+                </div>
+              </details>
+
+              <details class="lab-card collapsible-card" open>
+                <summary class="card-header collapsible-summary">
+                  <div class="card-title-group">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    <span>Working Memory Buffer (4-Turn) &amp; Telemetry Log</span>
+                  </div>
+                  <svg class="chevron-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </summary>
+                <div class="collapsible-body">
+                  <div class="working-mem-box" id="workingMemBox"></div>
+                  <div class="subbar-row">
+                    <span class="subbar-label">Eventos de auto-enseñanza y replay</span>
+                    <button type="button" class="btn btn-ghost btn-sm" id="btnManualSelfPlay">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                      </svg>
+                      <span>Consolidar +1</span>
+                    </button>
+                  </div>
+                  <div class="compact-list" id="selfTeachList"></div>
+                </div>
+              </details>
+            </div>
           </div>
-          <div class="scroll-list" id="selfTeachList"></div>
-        </div>
+        </section>
 
-        <!-- TAB 5: MEMORIA EPISÓDICA Y EMBEDDINGS -->
-        <div class="tab-content" id="tabVocab">
-          <form class="mini-teach-form" id="directTeachForm">
-            <input type="text" id="teachStimulus" placeholder="Estímulo..." required />
-            <input type="text" id="teachResponse" placeholder="Respuesta..." required />
-            <button type="submit" class="btn btn-sm btn-accent">+ Enseñar</button>
-          </form>
-          <div id="neighborsResult" class="neighbors-box hidden"></div>
-          <div class="vocab-cloud" id="vocabCloud" style="max-height: 75px;"></div>
-          <div class="scroll-list" id="episodesList"></div>
-        </div>
-      </aside>
-    </main>
+        <!-- VISTA 3: CENTRO DE CONOCIMIENTO Y PRODUCTIVIDAD -->
+        <section class="view-pane knowledge-pane" id="viewKnowledge" aria-label="Centro de Conocimiento y Productividad">
+          <div class="knowledge-grid">
+            <!-- COLUMNA 1: BIBLIOTECA VECTORIAL RAG & WIKIPEDIA -->
+            <div class="lab-card knowledge-col">
+              <div class="card-header">
+                <div class="card-title-group">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                  </svg>
+                  <span>Biblioteca RAG &amp; Wikipedia</span>
+                </div>
+                <button type="button" class="btn btn-ghost btn-sm" id="btnUploadFromKnowledge">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                  </svg>
+                  <span>Subir Archivo / CSV</span>
+                </button>
+              </div>
+
+              <form class="inline-form-duo" id="wikiResearchForm">
+                <input type="text" id="wikiQueryInput" placeholder="Investigar artículo en Wikipedia (ej: Entropía, Compilador)..." required />
+                <button type="submit" class="btn btn-accent btn-sm" id="btnWikiGo">Investigar</button>
+              </form>
+
+              <p class="panel-note">
+                Caché vectorial persistente en SQLite + RAM. Soporta <code class="mono">.csv</code> (estadística NumPy), <code class="mono">.pdf</code>, <code class="mono">.docx</code>, <code class="mono">.md</code>, <code class="mono">.py</code> y <code class="mono">.txt</code>.
+              </p>
+
+              <div class="spacious-list" id="ragDocsList"></div>
+            </div>
+
+            <!-- COLUMNA 2: GRAFO LÓGICO, AXIOMAS Y REGLAS SIMBÓLICAS -->
+            <div class="lab-card knowledge-col">
+              <div class="card-header">
+                <div class="card-title-group">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="18" cy="5" r="3"></circle>
+                    <circle cx="6" cy="12" r="3"></circle>
+                    <circle cx="18" cy="19" r="3"></circle>
+                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                  </svg>
+                  <span>Grafo Simbólico &amp; Reglas</span>
+                </div>
+                <span class="card-meta mono" id="factsCountBadge">0 AXIOMS</span>
+              </div>
+
+              <div class="inline-search-box">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="text" id="factsFilterInput" placeholder="Filtrar hechos, entidades o reglas condicionales..." />
+              </div>
+
+              <div class="spacious-list" id="factsList"></div>
+            </div>
+
+            <!-- COLUMNA 3: TABLERO KANBAN DE TAREAS & BLOC DE NOTAS -->
+            <div class="lab-card knowledge-col">
+              <div class="card-header">
+                <div class="card-title-group">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                    <line x1="9" y1="4" x2="9" y2="20"></line>
+                    <line x1="15" y1="4" x2="15" y2="20"></line>
+                  </svg>
+                  <span>Tablero de Tareas &amp; Notas</span>
+                </div>
+                <span class="card-meta mono" id="tasksCountBadge">0 PENDING</span>
+              </div>
+
+              <div class="dual-forms-stack">
+                <form class="inline-form-duo" id="quickTaskForm">
+                  <input type="text" id="quickTaskInput" placeholder="Añadir tarea al tablero..." required />
+                  <button type="submit" class="btn btn-accent btn-sm">+ Tarea</button>
+                </form>
+                <form class="inline-form-duo" id="quickNoteForm">
+                  <input type="text" id="quickNoteInput" placeholder="Guardar nota persistente..." required />
+                  <button type="submit" class="btn btn-ghost btn-sm">+ Nota</button>
+                </form>
+              </div>
+
+              <div class="kanban-board">
+                <div class="kanban-lane">
+                  <div class="kanban-lane-header">
+                    <span>PENDIENTES</span>
+                    <span class="mono" id="kanbanPendingCount">0</span>
+                  </div>
+                  <div class="kanban-items" id="kanbanPendingList"></div>
+                </div>
+                <div class="kanban-lane">
+                  <div class="kanban-lane-header">
+                    <span>COMPLETADAS</span>
+                    <span class="mono" id="kanbanDoneCount">0</span>
+                  </div>
+                  <div class="kanban-items" id="kanbanDoneList"></div>
+                </div>
+              </div>
+
+              <div class="notes-section-header">
+                <span>NOTAS GUARDADAS</span>
+                <span class="mono" id="notesCountBadge">0</span>
+              </div>
+              <div class="notes-list" id="notesBoardList"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
   </div>
 
-  <!-- MODAL CORRECCIÓN -->
+  <!-- TOOLTIP FLOTANTE GLASSMORPHISM PARA INSPECCIÓN DE CANVAS HIGH-DPI -->
+  <div class="canvas-tooltip glass-panel hidden" id="canvasTooltip"></div>
+
+  <!-- MODAL DE CORRECCIÓN SUPERVISADA -->
   <div class="modal-backdrop hidden" id="correctionModal">
-    <div class="modal-card">
-      <h3>✏️ Enseñar / Corregir Respuesta Ideal</h3>
-      <p class="modal-sub">El Micro-Transformer ajustará sus pesos Q, K, V y capas Swish con Adam.</p>
+    <div class="modal-card glass-panel">
+      <div class="modal-header">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 20h9"></path>
+          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+        </svg>
+        <h3>Corrección Supervisada de Pesos</h3>
+      </div>
+      <p class="modal-sub">
+        El Micro-Transformer ajustará sus 4 cabezas de atención, LayerNorm y proyección latente mediante Adam.
+      </p>
       <form id="correctionForm">
         <input type="hidden" id="modalEpisodeId" />
-        <label>¿Qué debe responder la IA a ese mensaje?</label>
-        <textarea id="modalCorrectedText" rows="3" placeholder="Escribe la respuesta ideal..." required></textarea>
+        <label for="modalCorrectedText">Respuesta objetivo ideal</label>
+        <textarea id="modalCorrectedText" rows="3" placeholder="Escribe la respuesta que debe aprender el modelo..." required></textarea>
         <div class="modal-actions">
-          <button type="button" class="btn btn-outline" id="btnCancelModal">Cancelar</button>
-          <button type="submit" class="btn btn-primary">Guardar y Entrenar</button>
+          <button type="button" class="btn btn-ghost" id="btnCancelModal">Cancelar</button>
+          <button type="submit" class="btn btn-accent">Entrenar Corrección</button>
         </div>
       </form>
     </div>
   </div>
 
-  <script src="/app.js"></script>
+  <script src="/app.js?v=3.0"></script>
 </body>
 </html>

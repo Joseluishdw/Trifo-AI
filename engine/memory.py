@@ -1,19 +1,70 @@
 """
-Sistema de Memoria Híbrida y Auto-Aprendizaje desde Cero:
-1. Memoria Episódica Asociativa: Experiencias (estímulo -> respuesta) tanto enseñadas
-   como auto-generadas por la propia IA al escucharte.
-2. Grafo de Conocimiento Semántico y Red de Conceptos Asociativos: Conecta cada palabra/concepto
-   importante que mencionas con tus ideas y con otros conceptos relacionados.
-3. Generador Neuronal-Markov (Bigramas + Trigramas): Permite a la IA construir frases
-   nuevas usando el vocabulario y estilo que aprende de ti.
-4. Bitácora de Auto-Enseñanza (Self-Teaching Log): Registra en vivo cada deducción,
-   auto-pregunta y conexión que la IA aprende por sí sola.
+NeuroZero 3.0 — Memoria Híbrida, Buffer Circular Multi-Turno y Neural-Markov Reranker.
+Incluye:
+- WorkingMemoryBuffer: Buffer circular de 4 turnos con decaimiento temporal exponencial.
+- Neural-Markov Reranker: Genera K=5 candidatos con bigramas/trigramas y selecciona el
+  más coherente por similitud coseno frente al vector latente predicho por el Micro-Transformer.
+- Memoria Episódica, Grafo Semántico y Red Asociativa de Conceptos.
 """
 
+import re
+import math
 import time
 import random
+from collections import deque
 from typing import List, Dict, Optional, Tuple
-from .tokenizer import strip_accents, STOPWORDS_ES, NaturalChatParser
+import numpy as np
+
+from .tokenizer import strip_accents, NaturalChatParser
+
+
+class WorkingMemoryBuffer:
+    """Buffer circular de los últimos N=4 turnos ponderados por decaimiento exponencial."""
+
+    def __init__(self, maxlen: int = 4, decay_rate: float = 0.55):
+        self.maxlen = maxlen
+        self.decay_rate = decay_rate
+        self.turns: deque[str] = deque(maxlen=maxlen)
+
+    def push_turn(self, text: str):
+        clean = text.strip()
+        if clean:
+            self.turns.append(clean)
+
+    def clear(self):
+        self.turns.clear()
+
+    def latest(self) -> str:
+        return self.turns[-1] if self.turns else ""
+
+    def get_weighted_turns(self) -> List[Tuple[str, float]]:
+        if not self.turns:
+            return []
+        items = list(self.turns)
+        n = len(items)
+        raw_weights = [math.exp(-self.decay_rate * (n - 1 - i)) for i in range(n)]
+        total_w = sum(raw_weights) or 1.0
+        return [(items[i], round(raw_weights[i] / total_w, 4)) for i in range(n)]
+
+    def get_encoded_turns(self, tokenizer) -> List[Tuple[List[int], float]]:
+        encoded: List[Tuple[List[int], float]] = []
+        for text, weight in self.get_weighted_turns():
+            ids = tokenizer.encode(text, learn_vocab=False)
+            if ids:
+                encoded.append((ids, weight))
+        return encoded
+
+    def as_summary_string(self) -> str:
+        return " | ".join(self.turns)
+
+    def to_list(self) -> List[str]:
+        return list(self.turns)
+
+    def from_list(self, data: List[str]):
+        self.turns.clear()
+        for item in data[-self.maxlen :]:
+            if isinstance(item, str) and item.strip():
+                self.turns.append(item.strip())
 
 
 class EpisodicMemoryItem:
@@ -34,7 +85,7 @@ class EpisodicMemoryItem:
         self.context = context
         self.reward = reward
         self.uses = uses
-        self.source = source  # "seed", "auto_self_taught", "conversational_mirror", "corrected"
+        self.source = source
         self.created_at = created_at or time.time()
 
     def to_dict(self) -> dict:
@@ -64,15 +115,6 @@ class EpisodicMemoryItem:
 
 
 class HybridMemorySystem:
-    """
-    Gestiona:
-    - Memoria Episódica
-    - Grafo de Conocimiento Semántico (Sujeto-Relación-Objeto)
-    - Grafo Asociativo de Conceptos Libres (para aprender de cualquier frase del usuario)
-    - Generador Secuencial Bigrama/Trigrama (Markov-Neuronal)
-    - Bitácora de Auto-Enseñanza en vivo
-    """
-
     def __init__(self):
         self.episodes: List[EpisodicMemoryItem] = []
         self.next_id: int = 1
@@ -80,16 +122,13 @@ class HybridMemorySystem:
         self.facts: List[Dict[str, object]] = []
         self.next_fact_id: int = 1
 
-        # Red asociativa de conceptos: {concepto: {concepto_vecino: peso}}
         self.concept_links: Dict[str, Dict[str, int]] = {}
-        # Ideas/frases aprendidas asociadas a cada concepto: {concepto: [frase1, frase2]}
         self.concept_memories: Dict[str, List[str]] = {}
 
-        # Transiciones de palabras para generación propia
         self.markov_bigrams: Dict[str, Dict[str, int]] = {}
         self.markov_trigrams: Dict[str, Dict[str, int]] = {}
 
-        # Bitácora de Auto-Enseñanza (lo que la IA va deduciendo y aprendiendo sola)
+        self.working_memory = WorkingMemoryBuffer(maxlen=4, decay_rate=0.55)
         self.self_teaching_log: List[Dict[str, object]] = []
 
     def log_self_teaching(self, kind: str, summary: str, detail: str, loss: Optional[float] = None):
@@ -123,6 +162,8 @@ class HybridMemorySystem:
                 and strip_accents(ep.response.lower().strip()) == resp_norm
             ):
                 ep.reward = min(3.0, ep.reward + 0.25)
+                if context:
+                    ep.context = context.strip()
                 return ep
 
         item = EpisodicMemoryItem(
@@ -139,17 +180,10 @@ class HybridMemorySystem:
         return item
 
     def absorb_user_statement_into_concepts(self, user_text: str, keywords: List[str]):
-        """
-        Absorbe libremente cualquier frase que el usuario dice:
-        1. Conecta entre sí todos los conceptos clave de la frase en `concept_links`.
-        2. Guarda la idea (con perspectiva transformada si hablaba de sí mismo) en `concept_memories`.
-        3. Alimenta el motor generativo de secuencias (Markov bigrama + trigrama).
-        """
         self.learn_markov_sequence(user_text)
         if not keywords:
             return
 
-        # Conectar conceptos co-ocurrentes en el grafo asociativo
         for i in range(len(keywords)):
             c1 = keywords[i]
             if c1 not in self.concept_links:
@@ -160,7 +194,6 @@ class HybridMemorySystem:
                 c2 = keywords[j]
                 self.concept_links[c1][c2] = self.concept_links[c1].get(c2, 0) + 1
 
-        # Si no es pregunta, guardar la idea asociada a cada concepto clave
         if not NaturalChatParser.is_question(user_text) and len(user_text.strip()) >= 5:
             shifted = NaturalChatParser.shift_user_to_second_person(user_text.strip())
             for kw in keywords[:4]:
@@ -209,13 +242,8 @@ class HybridMemorySystem:
         return new_fact
 
     def query_facts_and_concepts(self, user_text: str, keywords: List[str]) -> Optional[Tuple[str, Dict[str, object]]]:
-        """
-        Consulta tanto el Grafo de Conocimiento Estructurado como la Memoria de Conceptos Libres
-        para responder preguntas sobre lo que el usuario le ha platicado.
-        """
         norm = strip_accents(user_text.lower().strip())
 
-        # 1. Preguntas sobre el usuario
         if any(p in norm for p in ["como me llamo", "cual es mi nombre", "sabes mi nombre", "quien soy"]):
             for f in reversed(self.facts):
                 if f["category"] == "user" and f["relation"] == "nombre":
@@ -227,8 +255,7 @@ class HybridMemorySystem:
         if any(p in norm for p in ["que me gusta", "mis gustos", "que me encanta", "sabes que me gusta"]):
             gustos = [str(f["object"]) for f in self.facts if f["category"] == "user" and f["relation"] == "gusto"]
             if gustos:
-                lista = ", ".join(gustos[-3:])
-                return (f"Por lo que me has platicado, te gusta: {lista}.", self.facts[-1])
+                return (f"Por lo que me has platicado, te gusta: {', '.join(gustos[-3:])}.", self.facts[-1])
 
         if any(p in norm for p in ["que estoy haciendo", "que hago", "que ando haciendo", "que hice"]):
             for f in reversed(self.facts):
@@ -255,7 +282,6 @@ class HybridMemorySystem:
                         parts.append(f"tu {uf['relation']} es {uf['object']}")
                 return (f"De lo que hemos hablado, sé que: {', '.join(parts)}.", user_facts[-1])
 
-        # 2. Preguntas sobre la propia IA
         if any(p in norm for p in ["como te llamas", "cual es tu nombre", "quien eres", "que eres"]):
             ai_name = None
             ai_id = None
@@ -265,11 +291,10 @@ class HybridMemorySystem:
                 if f["category"] == "ai" and f["relation"] == "identidad" and not ai_id:
                     ai_id = f["object"]
             if ai_name and ai_id:
-                return (f"Me llamo {ai_name} y soy {ai_id}. Me auto-entreno con todo lo que hablamos.", f)
+                return (f"Me llamo {ai_name} y soy {ai_id}.", f)
             elif ai_name:
                 return (f"Me llamo {ai_name}.", f)
 
-        # 3. Preguntas sobre cualquier hecho o concepto aprendido del usuario
         if NaturalChatParser.is_question(user_text):
             for f in reversed(self.facts):
                 if f["category"] in {"world", "user"}:
@@ -278,11 +303,10 @@ class HybridMemorySystem:
                     for art in ("el ", "la ", "los ", "las ", "un ", "una ", "tu ", "mi "):
                         if subj_clean.startswith(art):
                             subj_clean = subj_clean[len(art):].strip()
-                    if len(subj_clean) >= 2 and subj_clean in norm:
+                    if len(subj_clean) >= 1 and re.search(rf"\b{re.escape(subj_clean)}\b", norm):
                         subj_display = str(f["subject"]).capitalize()
                         return (f"{subj_display} {f['relation']} {f['object']}.", f)
 
-            # Si no está como triple exacto, buscar en los conceptos libres (`concept_memories`)
             for kw in keywords:
                 if kw in self.concept_memories and self.concept_memories[kw]:
                     idea = self.concept_memories[kw][-1]
@@ -296,7 +320,6 @@ class HybridMemorySystem:
         return None
 
     def learn_markov_sequence(self, text: str):
-        """Entrena las tablas de transición de Bigramas y Trigramas con cada frase."""
         words = text.strip().split()
         if len(words) < 2:
             return
@@ -318,20 +341,9 @@ class HybridMemorySystem:
                     self.markov_trigrams[key_tri] = {}
                 self.markov_trigrams[key_tri][w3] = self.markov_trigrams[key_tri].get(w3, 0) + 1
 
-    def generate_sentence_from_seed(self, seed_words: List[str], max_len: int = 12) -> Optional[str]:
-        """
-        Genera una frase propia usando las cadenas de Markov (Trigramas + Bigramas)
-        iniciadas desde un concepto semilla que el usuario mencionó.
-        """
-        valid_seeds = [
-            strip_accents(w.lower()) for w in seed_words if strip_accents(w.lower()) in self.markov_bigrams
-        ]
-        if not valid_seeds:
-            return None
-
-        start = random.choice(valid_seeds)
-        chain = [start]
-        curr = start
+    def _sample_single_markov_chain(self, start_word: str, max_len: int = 14) -> Optional[str]:
+        chain = [start_word]
+        curr = start_word
 
         for _ in range(max_len):
             next_word = None
@@ -356,10 +368,66 @@ class HybridMemorySystem:
             curr = strip_accents(next_word.lower().strip(",.;:!?¡¿"))
 
         if len(chain) >= 4:
-            sentence = " ".join(chain)
-            sentence = NaturalChatParser.shift_user_to_second_person(sentence)
+            sentence = NaturalChatParser.shift_user_to_second_person(" ".join(chain))
             return sentence[0].upper() + sentence[1:]
         return None
+
+    def generate_sentence_from_seed(
+        self,
+        seed_words: List[str],
+        max_len: int = 14,
+        num_candidates: int = 5,
+        tokenizer=None,
+        neural_net=None,
+        target_latent_vec: Optional[np.ndarray] = None,
+    ) -> Optional[str]:
+        """
+        Neural-Markov Reranker:
+        Genera K=5 oraciones candidatas mediante cadenas de bigramas/trigramas y las
+        puntúa por similitud coseno contra el vector latente predicho por el Micro-Transformer.
+        """
+        valid_seeds = [
+            strip_accents(w.lower()) for w in seed_words if strip_accents(w.lower()) in self.markov_bigrams
+        ]
+        if not valid_seeds:
+            return None
+
+        candidates: List[str] = []
+        seen_norm = set()
+        max_attempts = num_candidates * 4
+
+        for attempt in range(max_attempts):
+            seed = valid_seeds[attempt % len(valid_seeds)]
+            cand = self._sample_single_markov_chain(seed, max_len=max_len)
+            if cand:
+                key = strip_accents(cand.lower())
+                if key not in seen_norm:
+                    seen_norm.add(key)
+                    candidates.append(cand)
+            if len(candidates) >= num_candidates:
+                break
+
+        if not candidates:
+            return None
+
+        if len(candidates) == 1 or tokenizer is None or neural_net is None or target_latent_vec is None:
+            return candidates[0]
+
+        target_flat = target_latent_vec.reshape(-1)
+        best_cand = candidates[0]
+        best_sim = -2.0
+
+        for cand in candidates:
+            c_ids = tokenizer.encode(cand, learn_vocab=False)
+            if not c_ids:
+                continue
+            c_vec = neural_net.encode_tokens(c_ids).reshape(-1)
+            sim = float(np.dot(c_vec, target_flat))
+            if sim > best_sim:
+                best_sim = sim
+                best_cand = cand
+
+        return best_cand
 
     def get_user_name(self) -> Optional[str]:
         for f in reversed(self.facts):
@@ -377,6 +445,7 @@ class HybridMemorySystem:
             "concept_memories": self.concept_memories,
             "markov_bigrams": self.markov_bigrams,
             "markov_trigrams": self.markov_trigrams,
+            "working_memory": self.working_memory.to_list(),
             "self_teaching_log": self.self_teaching_log,
         }
 
@@ -389,4 +458,5 @@ class HybridMemorySystem:
         self.concept_memories = data.get("concept_memories", {})
         self.markov_bigrams = data.get("markov_bigrams", {})
         self.markov_trigrams = data.get("markov_trigrams", {})
+        self.working_memory.from_list(data.get("working_memory", []))
         self.self_teaching_log = data.get("self_teaching_log", [])

@@ -1,21 +1,32 @@
 """
-Micro-Transformer Neuronal desde Cero en NumPy Puro (Nivel 2).
-Arquitectura:
-1. Embeddings Dinámicos (V x D) + Codificación Posicional Sinusoidal (Positional Encoding).
-2. Bloque de Auto-Atención Entrenable (Scaled Dot-Product Self-Attention: Q, K, V) con
-   conexión residual y Attention-Pooling para saber exactamente a qué palabras presta atención.
-3. Red Profunda Post-Atención (Swish + Tanh Residual) hacia el espacio latente semántico.
-4. Backpropagation exacto de extremo a extremo (incluyendo gradientes de Q, K, V y Embeddings)
-   con Optimizador Adam programado desde cero.
+NeuroZero 3.0 — Micro-Transformer Multi-Cabeza (MHSA) con LayerNorm en NumPy Puro.
+Incluye:
+- Multi-Head Self-Attention (H = 4 cabezas) con proyecciones Q, K, V y salida W_O.
+- Layer Normalization exacta (forward y Jacobiano analítico en backward) tras residuales.
+- Retropropagación completa hacia el mensaje actual y hacia el contexto conversacional.
+- Global L2 Norm Gradient Clipping + Optimizador Adam desde cero.
+- Guardado atómico de pesos (.tmp + os.replace).
 """
 
+import os
+import time
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 
 
+def atomic_replace_file(tmp_path: str, target_path: str, retries: int = 6):
+    for attempt in range(retries):
+        try:
+            os.replace(tmp_path, target_path)
+            return
+        except PermissionError:
+            if attempt == retries - 1:
+                raise
+            time.sleep(0.015 * (attempt + 1))
+
+
 def sigmoid(x: np.ndarray) -> np.ndarray:
-    x_clip = np.clip(x, -30.0, 30.0)
-    return 1.0 / (1.0 + np.exp(-x_clip))
+    return 1.0 / (1.0 + np.exp(-np.clip(x, -30.0, 30.0)))
 
 
 def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
@@ -30,8 +41,7 @@ def swish(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def swish_backward(grad_output: np.ndarray, x: np.ndarray, s: np.ndarray) -> np.ndarray:
-    d_swish = s + x * s * (1.0 - s)
-    return grad_output * d_swish
+    return grad_output * (s + x * s * (1.0 - s))
 
 
 def l2_normalize(v: np.ndarray, eps: float = 1e-8) -> np.ndarray:
@@ -39,8 +49,56 @@ def l2_normalize(v: np.ndarray, eps: float = 1e-8) -> np.ndarray:
     return v / np.maximum(norm, eps)
 
 
+def layer_norm_forward(
+    x: np.ndarray, gamma: np.ndarray, beta: np.ndarray, eps: float = 1e-5
+) -> Tuple[np.ndarray, dict]:
+    mean = np.mean(x, axis=-1, keepdims=True)
+    x_centered = x - mean
+    var = np.mean(x_centered ** 2, axis=-1, keepdims=True)
+    std_inv = 1.0 / np.sqrt(var + eps)
+    x_hat = x_centered * std_inv
+    out = gamma * x_hat + beta
+    cache = {
+        "x_hat": x_hat,
+        "std_inv": std_inv,
+        "gamma": gamma,
+        "feature_dim": x.shape[-1],
+    }
+    return out, cache
+
+
+def layer_norm_backward(
+    dout: np.ndarray, cache: dict
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    x_hat = cache["x_hat"]
+    std_inv = cache["std_inv"]
+    gamma = cache["gamma"]
+    n_feat = float(cache["feature_dim"])
+
+    dgamma = np.sum(dout * x_hat, axis=0, keepdims=True)
+    dbeta = np.sum(dout, axis=0, keepdims=True)
+
+    dx_hat = dout * gamma
+    sum_dx_hat = np.sum(dx_hat, axis=-1, keepdims=True)
+    sum_dx_hat_x = np.sum(dx_hat * x_hat, axis=-1, keepdims=True)
+    dx = (std_inv / n_feat) * (n_feat * dx_hat - sum_dx_hat - x_hat * sum_dx_hat_x)
+    return dx, dgamma, dbeta
+
+
+def clip_gradients_global_l2(
+    grads: Dict[str, np.ndarray], max_norm: float = 3.0
+) -> Tuple[Dict[str, np.ndarray], float]:
+    sq_sum = 0.0
+    for g in grads.values():
+        sq_sum += float(np.sum(g.astype(np.float64) ** 2))
+    global_norm = float(np.sqrt(sq_sum))
+    if global_norm > max_norm:
+        scale = max_norm / (global_norm + 1e-8)
+        grads = {k: (v * scale).astype(np.float32) for k, v in grads.items()}
+    return grads, global_norm
+
+
 def build_sinusoidal_positional_encoding(max_len: int, d_model: int) -> np.ndarray:
-    """Codificación posicional sinusoidal clásica de Transformers (Vaswani et al.)."""
     pe = np.zeros((max_len, d_model), dtype=np.float32)
     position = np.arange(0, max_len, dtype=np.float32)[:, np.newaxis]
     div_term = np.exp(np.arange(0, d_model, 2, dtype=np.float32) * -(np.log(10000.0) / d_model))
@@ -51,68 +109,80 @@ def build_sinusoidal_positional_encoding(max_len: int, d_model: int) -> np.ndarr
 
 class ScratchNeuralNetwork:
     """
-    Motor Neuronal Micro-Transformer en NumPy Puro:
-    Secuencia de Tokens -> Positional Encoding -> Self-Attention (Q, K, V)
-    -> Attention Pooling -> Concat Contexto -> Swish + Residual MLP -> Espacio Latente.
+    Micro-Transformer v3 en NumPy:
+    Tokens -> Positional Encoding -> Multi-Head Self-Attention (H=4, Q,K,V,W_O)
+    -> Residual + LayerNorm1 -> Attention Pooling -> Concat Contexto Multi-Turno
+    -> Swish Layer -> Tanh + Residual + LayerNorm2 -> Proyección Latente L2.
     """
 
     def __init__(
         self,
         vocab_size: int = 4,
         embed_dim: int = 64,
+        num_heads: int = 4,
         hidden1_dim: int = 128,
         hidden2_dim: int = 96,
-        learning_rate: float = 0.006,
-        max_seq_len: int = 40,
+        learning_rate: float = 0.005,
+        max_grad_norm: float = 3.0,
+        max_seq_len: int = 48,
         seed: int = 42,
     ):
+        if embed_dim % num_heads != 0:
+            raise ValueError(f"embed_dim ({embed_dim}) debe ser divisible entre num_heads ({num_heads}).")
+
         self.rng = np.random.default_rng(seed)
         self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
         self.input_dim = embed_dim * 2
         self.hidden1_dim = hidden1_dim
         self.hidden2_dim = hidden2_dim
         self.output_dim = embed_dim
         self.lr = learning_rate
+        self.max_grad_norm = max_grad_norm
         self.max_seq_len = max_seq_len
+        self.ctx_scale = 0.45
 
-        # Codificación posicional precalculada
         self.pos_encoding = build_sinusoidal_positional_encoding(max_seq_len, embed_dim)
 
-        # 1. Matriz de Embeddings Dinámicos (V, D)
         self.W_emb = self.rng.normal(0.0, 0.15, size=(vocab_size, embed_dim)).astype(np.float32)
         self.W_emb[0] = 0.0
 
-        # 2. Pesos del Bloque Transformer Self-Attention (Q, K, V + Vector de Pooling de Atención)
         scale_d = np.sqrt(1.0 / embed_dim)
         self.W_Q = self.rng.normal(0.0, scale_d, size=(embed_dim, embed_dim)).astype(np.float32)
         self.W_K = self.rng.normal(0.0, scale_d, size=(embed_dim, embed_dim)).astype(np.float32)
         self.W_V = self.rng.normal(0.0, scale_d, size=(embed_dim, embed_dim)).astype(np.float32)
+        self.W_O = self.rng.normal(0.0, scale_d, size=(embed_dim, embed_dim)).astype(np.float32)
+
+        self.gamma1 = np.ones((1, embed_dim), dtype=np.float32)
+        self.beta1 = np.zeros((1, embed_dim), dtype=np.float32)
         self.w_pool = self.rng.normal(0.0, scale_d, size=(embed_dim, 1)).astype(np.float32)
 
-        # 3. Capas Profundas Feed-Forward Post-Atención
         self.W1 = self.rng.normal(0.0, np.sqrt(2.0 / self.input_dim), size=(self.input_dim, hidden1_dim)).astype(np.float32)
         self.b1 = np.zeros((1, hidden1_dim), dtype=np.float32)
 
         self.W2 = self.rng.normal(0.0, np.sqrt(2.0 / hidden1_dim), size=(hidden1_dim, hidden2_dim)).astype(np.float32)
         self.b2 = np.zeros((1, hidden2_dim), dtype=np.float32)
-
         self.W_res = self.rng.normal(0.0, np.sqrt(1.0 / hidden1_dim), size=(hidden1_dim, hidden2_dim)).astype(np.float32)
+
+        self.gamma2 = np.ones((1, hidden2_dim), dtype=np.float32)
+        self.beta2 = np.zeros((1, hidden2_dim), dtype=np.float32)
 
         self.W3 = self.rng.normal(0.0, np.sqrt(1.0 / hidden2_dim), size=(hidden2_dim, self.output_dim)).astype(np.float32)
         self.b3 = np.zeros((1, self.output_dim), dtype=np.float32)
 
-        # 4. Optimizador Adam
         self.adam_t = 0
-        self.beta1 = 0.9
-        self.beta2 = 0.999
+        self.beta1_adam = 0.9
+        self.beta2_adam = 0.999
         self.eps = 1e-8
         self._init_adam_moments()
 
-        # 5. Telemetría en tiempo real
         self.total_epochs_trained = 0
         self.total_steps_trained = 0
+        self.last_grad_norm = 0.0
         self.loss_history: List[float] = []
         self.last_token_attention: List[Dict[str, object]] = []
+        self.last_head_attention: Dict[str, List[Dict[str, object]]] = {}
         self.last_activations: Dict[str, List[float]] = {
             "input": [0.0] * 16,
             "hidden1": [0.0] * 20,
@@ -122,21 +192,27 @@ class ScratchNeuralNetwork:
 
     def _get_params(self) -> Dict[str, np.ndarray]:
         return {
+            "W_emb": self.W_emb,
             "W_Q": self.W_Q,
             "W_K": self.W_K,
             "W_V": self.W_V,
+            "W_O": self.W_O,
+            "gamma1": self.gamma1,
+            "beta1": self.beta1,
             "w_pool": self.w_pool,
             "W1": self.W1,
             "b1": self.b1,
             "W2": self.W2,
             "b2": self.b2,
             "W_res": self.W_res,
+            "gamma2": self.gamma2,
+            "beta2": self.beta2,
             "W3": self.W3,
             "b3": self.b3,
         }
 
     def _init_adam_moments(self):
-        self.moments = {}
+        self.moments: Dict[str, np.ndarray] = {}
         for name, param in self._get_params().items():
             self.moments[f"m_{name}"] = np.zeros_like(param)
             self.moments[f"v_{name}"] = np.zeros_like(param)
@@ -149,7 +225,11 @@ class ScratchNeuralNetwork:
         new_rows = self.rng.normal(0.0, 0.15, size=(diff, self.embed_dim)).astype(np.float32)
         self.W_emb = np.vstack([self.W_emb, new_rows])
 
-    def update_cooccurrence_embeddings(self, token_ids: List[int], window: int = 3, lr_hebb: float = 0.025):
+        zeros_ext = np.zeros((diff, self.embed_dim), dtype=np.float32)
+        self.moments["m_W_emb"] = np.vstack([self.moments["m_W_emb"], zeros_ext])
+        self.moments["v_W_emb"] = np.vstack([self.moments["v_W_emb"], zeros_ext])
+
+    def update_cooccurrence_embeddings(self, token_ids: List[int], window: int = 3, lr_hebb: float = 0.02):
         valid_ids = [idx for idx in token_ids if 3 < idx < self.W_emb.shape[0]]
         n = len(valid_ids)
         if n < 2:
@@ -157,11 +237,9 @@ class ScratchNeuralNetwork:
         for i in range(n):
             u = valid_ids[i]
             for j in range(max(0, i - window), min(n, i + window + 1)):
-                if i == j:
+                if i == j or valid_ids[j] == u:
                     continue
                 v = valid_ids[j]
-                if u == v:
-                    continue
                 vec_u = self.W_emb[u].copy()
                 vec_v = self.W_emb[v].copy()
                 self.W_emb[u] += lr_hebb * (vec_v - vec_u * 0.08)
@@ -175,64 +253,182 @@ class ScratchNeuralNetwork:
         tokens_str: Optional[List[str]] = None,
         record_attention: bool = False,
     ) -> Tuple[np.ndarray, dict]:
-        """
-        Pasa una secuencia de tokens por el bloque Self-Attention:
-        H0 = Emb(tokens) + 0.25 * PosEncoding
-        Q = H0 @ W_Q, K = H0 @ W_K, V = H0 @ W_V
-        Attn = softmax((Q @ K.T) / sqrt(D))
-        O = Attn @ V + H0  (Conexión Residual)
-        alpha = softmax(O @ w_pool)
-        pooled = L2Norm(sum(alpha * O))
-        """
         if not token_ids:
             zero = np.zeros((1, self.embed_dim), dtype=np.float32)
             return zero, {"empty": True}
 
-        seq_ids = [idx if idx < self.W_emb.shape[0] else 1 for idx in token_ids[: self.max_seq_len]]
+        seq_ids = [idx if 0 <= idx < self.W_emb.shape[0] else 1 for idx in token_ids[: self.max_seq_len]]
         L = len(seq_ids)
-        emb = self.W_emb[seq_ids]  # (L, D)
-        H0 = emb + 0.22 * self.pos_encoding[:L]  # (L, D)
+        H = self.num_heads
+        d_h = self.head_dim
 
-        Q = H0 @ self.W_Q  # (L, D)
-        K = H0 @ self.W_K  # (L, D)
-        V = H0 @ self.W_V  # (L, D)
+        emb = self.W_emb[seq_ids]
+        H0 = (emb + 0.22 * self.pos_encoding[:L]).astype(np.float32)
 
-        scale = 1.0 / np.sqrt(float(self.embed_dim))
-        scores = (Q @ K.T) * scale  # (L, L)
-        attn_matrix = softmax(scores, axis=-1)  # (L, L)
+        Q = H0 @ self.W_Q
+        K = H0 @ self.W_K
+        V = H0 @ self.W_V
 
-        context_seq = attn_matrix @ V  # (L, D)
-        O = context_seq + H0  # Residual connection (L, D)
+        Q_h = Q.reshape(L, H, d_h).transpose(1, 0, 2)
+        K_h = K.reshape(L, H, d_h).transpose(1, 0, 2)
+        V_h = V.reshape(L, H, d_h).transpose(1, 0, 2)
 
-        pool_logits = O @ self.w_pool  # (L, 1)
-        alpha = softmax(pool_logits, axis=0)  # (L, 1)
+        scale = 1.0 / np.sqrt(float(d_h))
+        scores = np.matmul(Q_h, K_h.transpose(0, 2, 1)) * scale
+        attn_weights = softmax(scores, axis=-1)
 
-        raw_pooled = np.sum(alpha * O, axis=0, keepdims=True)  # (1, D)
+        context_h = np.matmul(attn_weights, V_h)
+        context_concat = context_h.transpose(1, 0, 2).reshape(L, self.embed_dim)
+        mhsa_out = context_concat @ self.W_O
+
+        u1 = H0 + mhsa_out
+        O, ln1_cache = layer_norm_forward(u1, self.gamma1, self.beta1)
+
+        pool_logits = O @ self.w_pool
+        alpha = softmax(pool_logits, axis=0)
+
+        raw_pooled = np.sum(alpha * O, axis=0, keepdims=True)
         raw_norm = np.maximum(np.linalg.norm(raw_pooled, axis=-1, keepdims=True), 1e-6)
         pooled = raw_pooled / raw_norm
 
         if record_attention and tokens_str:
             words_cut = tokens_str[:L]
-            self.last_token_attention = [
-                {"token": words_cut[i], "weight": round(float(alpha[i, 0]), 3)}
-                for i in range(len(words_cut))
+            n_w = len(words_cut)
+            combined_list = [
+                {"token": words_cut[i], "weight": round(float(alpha[i, 0]), 4)}
+                for i in range(n_w)
             ]
+            head_dict: Dict[str, List[Dict[str, object]]] = {"combined": combined_list}
+            for h_idx in range(H):
+                mean_col_attn = np.mean(attn_weights[h_idx, :n_w, :n_w], axis=0)
+                head_dict[f"head_{h_idx}"] = [
+                    {"token": words_cut[i], "weight": round(float(mean_col_attn[i]), 4)}
+                    for i in range(n_w)
+                ]
+            self.last_token_attention = combined_list
+            self.last_head_attention = head_dict
 
         attn_cache = {
             "empty": False,
             "seq_ids": seq_ids,
             "H0": H0,
-            "Q": Q,
-            "K": K,
-            "V": V,
-            "attn_matrix": attn_matrix,
+            "Q_h": Q_h,
+            "K_h": K_h,
+            "V_h": V_h,
+            "attn_weights": attn_weights,
+            "context_concat": context_concat,
+            "ln1_cache": ln1_cache,
             "O": O,
             "alpha": alpha,
-            "raw_pooled": raw_pooled,
             "raw_norm": raw_norm,
             "pooled": pooled,
         }
         return pooled, attn_cache
+
+    def _backward_sequence_attention(
+        self, d_pooled: np.ndarray, attn_cache: dict, acc_grads: Dict[str, np.ndarray]
+    ):
+        if attn_cache.get("empty", True):
+            return
+
+        pooled = attn_cache["pooled"]
+        raw_norm = attn_cache["raw_norm"]
+        O = attn_cache["O"]
+        alpha = attn_cache["alpha"]
+        ln1_cache = attn_cache["ln1_cache"]
+        context_concat = attn_cache["context_concat"]
+        attn_weights = attn_cache["attn_weights"]
+        H0 = attn_cache["H0"]
+        Q_h = attn_cache["Q_h"]
+        K_h = attn_cache["K_h"]
+        V_h = attn_cache["V_h"]
+        seq_ids = attn_cache["seq_ids"]
+
+        L = len(seq_ids)
+        H = self.num_heads
+        d_h = self.head_dim
+        scale = 1.0 / np.sqrt(float(d_h))
+
+        p_proj = np.sum(d_pooled * pooled, axis=-1, keepdims=True)
+        d_raw_pooled = (d_pooled - pooled * p_proj) / raw_norm
+
+        dO = alpha @ d_raw_pooled
+        d_alpha = O @ d_raw_pooled.T
+
+        sum_da = np.sum(d_alpha * alpha, axis=0, keepdims=True)
+        d_pool_logits = alpha * (d_alpha - sum_da)
+        acc_grads["w_pool"] += O.T @ d_pool_logits
+        dO = dO + (d_pool_logits @ self.w_pool.T)
+
+        du1, dgamma1, dbeta1 = layer_norm_backward(dO, ln1_cache)
+        acc_grads["gamma1"] += dgamma1
+        acc_grads["beta1"] += dbeta1
+
+        dH0 = du1.copy()
+        d_mhsa_out = du1
+
+        acc_grads["W_O"] += context_concat.T @ d_mhsa_out
+        d_context_concat = d_mhsa_out @ self.W_O.T
+
+        d_context_h = d_context_concat.reshape(L, H, d_h).transpose(1, 0, 2)
+        dV_h = np.matmul(attn_weights.transpose(0, 2, 1), d_context_h)
+        d_attn_weights = np.matmul(d_context_h, V_h.transpose(0, 2, 1))
+
+        sum_dattn = np.sum(d_attn_weights * attn_weights, axis=-1, keepdims=True)
+        d_scores = attn_weights * (d_attn_weights - sum_dattn) * scale
+
+        dQ_h = np.matmul(d_scores, K_h)
+        dK_h = np.matmul(d_scores.transpose(0, 2, 1), Q_h)
+
+        dQ = dQ_h.transpose(1, 0, 2).reshape(L, self.embed_dim)
+        dK = dK_h.transpose(1, 0, 2).reshape(L, self.embed_dim)
+        dV = dV_h.transpose(1, 0, 2).reshape(L, self.embed_dim)
+
+        acc_grads["W_Q"] += H0.T @ dQ
+        acc_grads["W_K"] += H0.T @ dK
+        acc_grads["W_V"] += H0.T @ dV
+
+        dH0 += (dQ @ self.W_Q.T) + (dK @ self.W_K.T) + (dV @ self.W_V.T)
+
+        for pos_i, tok_id in enumerate(seq_ids):
+            if 0 < tok_id < self.W_emb.shape[0]:
+                acc_grads["W_emb"][tok_id] += dH0[pos_i]
+
+    def encode_context(
+        self,
+        ctx_token_ids: Optional[List[int]] = None,
+        ctx_turns: Optional[List[Tuple[List[int], float]]] = None,
+    ) -> Tuple[np.ndarray, dict]:
+        valid_turns: List[Tuple[List[int], float]] = []
+        if ctx_turns:
+            for t_ids, weight in ctx_turns:
+                if t_ids and weight > 0.0:
+                    valid_turns.append((t_ids, float(weight)))
+        elif ctx_token_ids:
+            valid_turns.append((ctx_token_ids, 1.0))
+
+        if not valid_turns:
+            zero = np.zeros((1, self.embed_dim), dtype=np.float32)
+            return zero, {"empty": True}
+
+        total_w = sum(w for _, w in valid_turns)
+        norm_turns = [(t_ids, w / max(total_w, 1e-8)) for t_ids, w in valid_turns]
+
+        raw_ctx = np.zeros((1, self.embed_dim), dtype=np.float32)
+        turn_caches = []
+        for t_ids, w in norm_turns:
+            u_vec, t_cache = self.encode_sequence_with_attention(t_ids)
+            raw_ctx += w * u_vec
+            turn_caches.append((w, t_cache))
+
+        ctx_norm = np.maximum(np.linalg.norm(raw_ctx, axis=-1, keepdims=True), 1e-6)
+        ctx_vec = raw_ctx / ctx_norm
+        return ctx_vec, {
+            "empty": False,
+            "ctx_vec": ctx_vec,
+            "ctx_norm": ctx_norm,
+            "turn_caches": turn_caches,
+        }
 
     def encode_tokens(
         self,
@@ -241,7 +437,6 @@ class ScratchNeuralNetwork:
         tokens_str: Optional[List[str]] = None,
         record_attention: bool = False,
     ) -> np.ndarray:
-        """Codifica una lista de IDs usando el bloque Transformer Self-Attention."""
         pooled, _ = self.encode_sequence_with_attention(
             token_ids, tokens_str=tokens_str, record_attention=record_attention
         )
@@ -256,7 +451,7 @@ class ScratchNeuralNetwork:
         if ctx_vec is None:
             ctx_vec = np.zeros_like(msg_vec)
 
-        x = np.hstack([msg_vec, ctx_vec * 0.45]).astype(np.float32)
+        x = np.hstack([msg_vec, ctx_vec * self.ctx_scale]).astype(np.float32)
 
         z1 = x @ self.W1 + self.b1
         a1, s1 = swish(z1)
@@ -264,7 +459,8 @@ class ScratchNeuralNetwork:
         z2 = a1 @ self.W2 + self.b2
         t2 = np.tanh(z2)
         res = a1 @ self.W_res
-        a2 = t2 + 0.35 * res
+        u2 = t2 + 0.35 * res
+        a2, ln2_cache = layer_norm_forward(u2, self.gamma2, self.beta2)
 
         z3 = a2 @ self.W3 + self.b3
         out = l2_normalize(z3)
@@ -274,8 +470,8 @@ class ScratchNeuralNetwork:
             "z1": z1,
             "s1": s1,
             "a1": a1,
-            "z2": z2,
             "t2": t2,
+            "ln2_cache": ln2_cache,
             "a2": a2,
             "z3": z3,
             "out": out,
@@ -283,10 +479,10 @@ class ScratchNeuralNetwork:
 
         if record_telemetry and x.shape[0] > 0:
             self.last_activations = {
-                "input": np.clip(x[0, :16], -1.5, 1.5).tolist(),
-                "hidden1": np.clip(a1[0, :20], -1.5, 1.5).tolist(),
-                "hidden2": np.clip(a2[0, :16], -1.5, 1.5).tolist(),
-                "output": np.clip(out[0, :16], -1.5, 1.5).tolist(),
+                "input": np.clip(x[0, :16], -2.0, 2.0).tolist(),
+                "hidden1": np.clip(a1[0, :20], -2.0, 2.0).tolist(),
+                "hidden2": np.clip(a2[0, :16], -2.0, 2.0).tolist(),
+                "output": np.clip(out[0, :16], -2.0, 2.0).tolist(),
             }
 
         return out, cache
@@ -296,21 +492,15 @@ class ScratchNeuralNetwork:
         msg_token_ids: List[int],
         target_token_ids: List[int],
         ctx_token_ids: Optional[List[int]] = None,
+        ctx_turns: Optional[List[Tuple[List[int], float]]] = None,
         negative_token_ids: Optional[List[int]] = None,
         reward_weight: float = 1.0,
     ) -> float:
-        """
-        Backpropagation completo a través de:
-        1. Capas densas residuales (W3, W2, W_res, W1)
-        2. Attention Pooling (w_pool)
-        3. Bloque Transformer Self-Attention (W_Q, W_K, W_V)
-        4. Matriz de Embeddings Léxicos (W_emb)
-        """
-        msg_vec, attn_cache = self.encode_sequence_with_attention(msg_token_ids)
-        ctx_vec = self.encode_tokens(ctx_token_ids) if ctx_token_ids else np.zeros_like(msg_vec)
+        msg_vec, msg_attn_cache = self.encode_sequence_with_attention(msg_token_ids)
+        ctx_vec, ctx_cache = self.encode_context(ctx_token_ids=ctx_token_ids, ctx_turns=ctx_turns)
         target_vec = self.encode_tokens(target_token_ids)
 
-        pred_out, cache = self.forward(msg_vec, ctx_vec, record_telemetry=True)
+        _, cache = self.forward(msg_vec, ctx_vec, record_telemetry=True)
         z3 = cache["z3"]
         z3_norm = np.maximum(np.linalg.norm(z3, axis=-1, keepdims=True), 1e-6)
         pred_raw_normed = z3 / z3_norm
@@ -339,23 +529,23 @@ class ScratchNeuralNetwork:
                 loss = 0.01
                 grad_normed = np.zeros_like(pred_raw_normed)
 
-        # Backprop normalización de salida
         proj = np.sum(grad_normed * pred_raw_normed, axis=-1, keepdims=True)
         dz3 = (grad_normed - pred_raw_normed * proj) / z3_norm
 
-        # Backprop MLP
         a2 = cache["a2"]
         dW3 = a2.T @ dz3
         db3 = np.sum(dz3, axis=0, keepdims=True)
         da2 = dz3 @ self.W3.T
 
+        du2, dgamma2, dbeta2 = layer_norm_backward(da2, cache["ln2_cache"])
+
         t2 = cache["t2"]
         a1 = cache["a1"]
-        dz2 = da2 * (1.0 - t2 ** 2)
+        dz2 = du2 * (1.0 - t2 ** 2)
         dW2 = a1.T @ dz2
         db2 = np.sum(dz2, axis=0, keepdims=True)
-        dW_res = a1.T @ (da2 * 0.35)
-        da1 = (dz2 @ self.W2.T) + (da2 * 0.35) @ self.W_res.T
+        dW_res = a1.T @ (du2 * 0.35)
+        da1 = (dz2 @ self.W2.T) + (du2 * 0.35) @ self.W_res.T
 
         z1 = cache["z1"]
         s1 = cache["s1"]
@@ -365,78 +555,39 @@ class ScratchNeuralNetwork:
         db1 = np.sum(dz1, axis=0, keepdims=True)
         dx = dz1 @ self.W1.T
 
-        # Backprop hacia el Bloque Self-Attention (Q, K, V, w_pool)
-        d_msg_pooled = dx[:, : self.embed_dim]  # (1, D)
-        dW_Q = np.zeros_like(self.W_Q)
-        dW_K = np.zeros_like(self.W_K)
-        dW_V = np.zeros_like(self.W_V)
-        dw_pool = np.zeros_like(self.w_pool)
-
-        if not attn_cache.get("empty", True):
-            pooled = attn_cache["pooled"]
-            raw_norm = attn_cache["raw_norm"]
-            O = attn_cache["O"]
-            alpha = attn_cache["alpha"]  # (L, 1)
-            attn_mat = attn_cache["attn_matrix"]  # (L, L)
-            H0 = attn_cache["H0"]
-            Q = attn_cache["Q"]
-            K = attn_cache["K"]
-            V = attn_cache["V"]
-            seq_ids = attn_cache["seq_ids"]
-
-            # Jacobiano L2 norm en el pooling
-            p_proj = np.sum(d_msg_pooled * pooled, axis=-1, keepdims=True)
-            d_raw_pooled = (d_msg_pooled - pooled * p_proj) / raw_norm  # (1, D)
-
-            # raw_pooled = sum(alpha * O, axis=0)
-            dO = alpha @ d_raw_pooled  # (L, D)
-            d_alpha = O @ d_raw_pooled.T  # (L, 1)
-
-            # alpha = softmax(O @ w_pool, axis=0)
-            sum_da_alpha = np.sum(d_alpha * alpha, axis=0, keepdims=True)
-            d_pool_logits = alpha * (d_alpha - sum_da_alpha)  # (L, 1)
-            dw_pool = O.T @ d_pool_logits  # (D, 1)
-            dO += d_pool_logits @ self.w_pool.T  # (L, D)
-
-            # O = attn_mat @ V + H0
-            dH0 = dO.copy()
-            dV = attn_mat.T @ dO  # (L, D)
-            d_attn_mat = dO @ V.T  # (L, L)
-
-            # attn_mat = softmax(scores, axis=-1)
-            sum_dattn = np.sum(d_attn_mat * attn_mat, axis=-1, keepdims=True)
-            scale = 1.0 / np.sqrt(float(self.embed_dim))
-            d_scores = attn_mat * (d_attn_mat - sum_dattn) * scale  # (L, L)
-
-            dQ = d_scores @ K  # (L, D)
-            dK = d_scores.T @ Q  # (L, D)
-
-            dW_Q = H0.T @ dQ
-            dW_K = H0.T @ dK
-            dW_V = H0.T @ dV
-
-            dH0 += (dQ @ self.W_Q.T) + (dK @ self.W_K.T) + (dV @ self.W_V.T)
-
-            # Actualizar embeddings de las palabras de entrada
-            for pos_i, tok_id in enumerate(seq_ids):
-                if 3 < tok_id < self.W_emb.shape[0]:
-                    step_emb = np.clip(dH0[pos_i] * (self.lr * 0.45), -0.05, 0.05)
-                    self.W_emb[tok_id] -= step_emb
-
-        grads = {
-            "W_Q": np.clip(dW_Q, -2.0, 2.0),
-            "W_K": np.clip(dW_K, -2.0, 2.0),
-            "W_V": np.clip(dW_V, -2.0, 2.0),
-            "w_pool": np.clip(dw_pool, -2.0, 2.0),
-            "W1": np.clip(dW1, -2.0, 2.0),
-            "b1": np.clip(db1, -2.0, 2.0),
-            "W2": np.clip(dW2, -2.0, 2.0),
-            "b2": np.clip(db2, -2.0, 2.0),
-            "W_res": np.clip(dW_res, -2.0, 2.0),
-            "W3": np.clip(dW3, -2.0, 2.0),
-            "b3": np.clip(db3, -2.0, 2.0),
+        grads: Dict[str, np.ndarray] = {
+            name: np.zeros_like(param) for name, param in self._get_params().items()
         }
+        grads["W1"] = dW1
+        grads["b1"] = db1
+        grads["W2"] = dW2
+        grads["b2"] = db2
+        grads["W_res"] = dW_res
+        grads["gamma2"] = dgamma2
+        grads["beta2"] = dbeta2
+        grads["W3"] = dW3
+        grads["b3"] = db3
+
+        # 1. Retropropagación hacia el bloque MHSA del mensaje actual
+        d_msg_pooled = dx[:, : self.embed_dim]
+        self._backward_sequence_attention(d_msg_pooled, msg_attn_cache, grads)
+
+        # 2. Retropropagación completa hacia el bloque MHSA y embeddings del contexto conversacional
+        if not ctx_cache.get("empty", True):
+            d_ctx_scaled = dx[:, self.embed_dim :] * self.ctx_scale
+            c_vec = ctx_cache["ctx_vec"]
+            c_norm = ctx_cache["ctx_norm"]
+            c_proj = np.sum(d_ctx_scaled * c_vec, axis=-1, keepdims=True)
+            d_raw_ctx = (d_ctx_scaled - c_vec * c_proj) / c_norm
+
+            for turn_w, turn_attn_cache in ctx_cache["turn_caches"]:
+                self._backward_sequence_attention(d_raw_ctx * turn_w, turn_attn_cache, grads)
+
+        grads["W_emb"][0] = 0.0
+        grads, global_norm = clip_gradients_global_l2(grads, max_norm=self.max_grad_norm)
+        self.last_grad_norm = round(global_norm, 5)
         self._apply_adam(grads)
+        self.W_emb[0] = 0.0
 
         self.total_steps_trained += 1
         self.loss_history.append(round(float(loss), 5))
@@ -448,20 +599,19 @@ class ScratchNeuralNetwork:
     def _apply_adam(self, grads: Dict[str, np.ndarray]):
         self.adam_t += 1
         params = self._get_params()
-        bias_corr1 = 1.0 - (self.beta1 ** self.adam_t)
-        bias_corr2 = 1.0 - (self.beta2 ** self.adam_t)
+        bias_corr1 = 1.0 - (self.beta1_adam ** self.adam_t)
+        bias_corr2 = 1.0 - (self.beta2_adam ** self.adam_t)
 
         for name, param in params.items():
             g = grads[name]
             m = self.moments[f"m_{name}"]
             v = self.moments[f"v_{name}"]
 
-            m[:] = self.beta1 * m + (1.0 - self.beta1) * g
-            v[:] = self.beta2 * v + (1.0 - self.beta2) * (g ** 2)
+            m[:] = self.beta1_adam * m + (1.0 - self.beta1_adam) * g
+            v[:] = self.beta2_adam * v + (1.0 - self.beta2_adam) * (g ** 2)
 
             m_hat = m / bias_corr1
             v_hat = v / bias_corr2
-
             param -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
 
     def get_nearest_words(self, word_idx: int, idx2word: Dict[int, str], top_k: int = 6) -> List[Dict[str, float]]:
@@ -484,49 +634,68 @@ class ScratchNeuralNetwork:
         return results
 
     def parameter_count(self) -> int:
-        total = self.W_emb.size
-        for p in self._get_params().values():
-            total += p.size
-        return int(total)
+        return int(sum(p.size for p in self._get_params().values()))
 
     def save_weights(self, filepath: str):
-        np.savez(
-            filepath,
-            W_emb=self.W_emb,
-            W_Q=self.W_Q,
-            W_K=self.W_K,
-            W_V=self.W_V,
-            w_pool=self.w_pool,
-            W1=self.W1,
-            b1=self.b1,
-            W2=self.W2,
-            b2=self.b2,
-            W_res=self.W_res,
-            W3=self.W3,
-            b3=self.b3,
-            meta=np.array([self.total_epochs_trained, self.total_steps_trained, self.adam_t], dtype=np.int64),
-            loss_history=np.array(self.loss_history, dtype=np.float32),
-        )
+        tmp_path = f"{filepath}.tmp"
+        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+        with open(tmp_path, "wb") as f:
+            np.savez(
+                f,
+                W_emb=self.W_emb,
+                W_Q=self.W_Q,
+                W_K=self.W_K,
+                W_V=self.W_V,
+                W_O=self.W_O,
+                gamma1=self.gamma1,
+                beta1=self.beta1,
+                w_pool=self.w_pool,
+                W1=self.W1,
+                b1=self.b1,
+                W2=self.W2,
+                b2=self.b2,
+                W_res=self.W_res,
+                gamma2=self.gamma2,
+                beta2=self.beta2,
+                W3=self.W3,
+                b3=self.b3,
+                meta=np.array(
+                    [self.total_epochs_trained, self.total_steps_trained, self.adam_t, self.num_heads],
+                    dtype=np.int64,
+                ),
+                loss_history=np.array(self.loss_history, dtype=np.float32),
+            )
+            f.flush()
+            os.fsync(f.fileno())
+        atomic_replace_file(tmp_path, filepath)
 
     def load_weights(self, filepath: str):
-        data = np.load(filepath)
-        if data["W_emb"].shape[1] != self.embed_dim or "W_Q" not in data:
-            raise ValueError("Arquitectura actualizada a Micro-Transformer v2; requiere re-entrenar pesos.")
-        self.W_emb = data["W_emb"].astype(np.float32)
-        self.W_Q = data["W_Q"].astype(np.float32)
-        self.W_K = data["W_K"].astype(np.float32)
-        self.W_V = data["W_V"].astype(np.float32)
-        self.w_pool = data["w_pool"].astype(np.float32)
-        self.W1 = data["W1"].astype(np.float32)
-        self.b1 = data["b1"].astype(np.float32)
-        self.W2 = data["W2"].astype(np.float32)
-        self.b2 = data["b2"].astype(np.float32)
-        self.W_res = data["W_res"].astype(np.float32)
-        self.W3 = data["W3"].astype(np.float32)
-        self.b3 = data["b3"].astype(np.float32)
-        meta = data["meta"]
-        self.total_epochs_trained = int(meta[0])
-        self.total_steps_trained = int(meta[1])
-        self.adam_t = int(meta[2])
-        self.loss_history = data["loss_history"].astype(float).tolist()
+        with np.load(filepath) as data:
+            required = ("W_emb", "W_Q", "W_K", "W_V", "W_O", "gamma1", "beta1", "gamma2", "beta2")
+            if any(k not in data for k in required) or data["W_emb"].shape[1] != self.embed_dim:
+                raise ValueError("Pesos incompatibles con Micro-Transformer MHSA v3; se requiere reinicializar.")
+
+            self.W_emb = data["W_emb"].astype(np.float32)
+            self.W_Q = data["W_Q"].astype(np.float32)
+            self.W_K = data["W_K"].astype(np.float32)
+            self.W_V = data["W_V"].astype(np.float32)
+            self.W_O = data["W_O"].astype(np.float32)
+            self.gamma1 = data["gamma1"].astype(np.float32)
+            self.beta1 = data["beta1"].astype(np.float32)
+            self.w_pool = data["w_pool"].astype(np.float32)
+            self.W1 = data["W1"].astype(np.float32)
+            self.b1 = data["b1"].astype(np.float32)
+            self.W2 = data["W2"].astype(np.float32)
+            self.b2 = data["b2"].astype(np.float32)
+            self.W_res = data["W_res"].astype(np.float32)
+            self.gamma2 = data["gamma2"].astype(np.float32)
+            self.beta2 = data["beta2"].astype(np.float32)
+            self.W3 = data["W3"].astype(np.float32)
+            self.b3 = data["b3"].astype(np.float32)
+
+            meta = data["meta"]
+            self.total_epochs_trained = int(meta[0])
+            self.total_steps_trained = int(meta[1])
+            self.adam_t = int(meta[2])
+            self.loss_history = data["loss_history"].astype(float).tolist()
         self._init_adam_moments()

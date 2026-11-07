@@ -5,11 +5,12 @@ __pycache__/
 # Estado local entrenado y bases SQLite personales
 data/*.npz
 data/*.json
+data/*.tmp
 data/*.db
 data/*.db-journal
 data/*.db-wal
-exports/*
-!exports/.gitkeep
+data/*.db-shm
+exports/
 
 .env
 .vscode/
